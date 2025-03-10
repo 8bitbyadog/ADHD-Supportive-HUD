@@ -1,0 +1,56 @@
+name: Unity Build
+
+on:
+  push:
+    branches: [ develop, main ]
+  pull_request:
+    branches: [ develop, main ]
+
+jobs:
+  build:
+    name: Build for Quest 3
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          lfs: true
+          
+      - name: Cache Unity packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ github.workspace }}/Library
+          key: ${{ runner.os }}-unity-${{ hashFiles('**/Packages/manifest.json') }}
+          restore-keys: |
+            ${{ runner.os }}-unity-
+            
+      - name: Cache Unity license
+        uses: actions/cache@v3
+        with:
+          path: ${{ github.workspace }}/.local/share/Unity
+          key: ${{ runner.os }}-unity-license-${{ secrets.UNITY_LICENSE }}
+          restore-keys: |
+            ${{ runner.os }}-unity-license-
+            
+      - name: Activate Unity license
+        run: |
+          mkdir -p .local/share/Unity
+          echo "${{ secrets.UNITY_LICENSE }}" > .local/share/Unity/Unity_lic.ulf
+          
+      - name: Build Unity project
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/project -w /project \
+            -e UNITY_LICENSE="${{ secrets.UNITY_LICENSE }}" \
+            -e UNITY_USERNAME="${{ secrets.UNITY_USERNAME }}" \
+            -e UNITY_PASSWORD="${{ secrets.UNITY_PASSWORD }}" \
+            -e UNITY_SERIAL="${{ secrets.UNITY_SERIAL }}" \
+            -e UNITY_VERSION="2022.3.16f1" \
+            unityci/editor:ubuntu-2022.3.16f1-android-0 \
+            unity-builder \
+            -projectPath /project \
+            -buildTarget Android \
+            -androidVersionCode ${{ github.run_number }} \
+            -executeMethod BuildManager.BuildQuest3 \
+            -quit \
+            -batchmode \
+            -nographics \
+            -logfile /dev/stdout 
