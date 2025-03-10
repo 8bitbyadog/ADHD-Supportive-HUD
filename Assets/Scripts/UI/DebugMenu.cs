@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Collections.Generic;
 
 public class DebugMenu : MonoBehaviour
 {
@@ -36,16 +37,32 @@ public class DebugMenu : MonoBehaviour
     public TextMeshProUGUI focusLevelText;
     public TextMeshProUGUI overstimulationText;
     
+    [Header("Quest Testing")]
+    public Button validateBuildButton;
+    public Button runPerformanceTestButton;
+    public Toggle passthroughTestToggle;
+    public Toggle handTrackingTestToggle;
+    public TextMeshProUGUI buildStatusText;
+    
     private DevelopmentSettings devSettings;
+    private QuestBuildValidator questValidator;
     private float updateInterval = 0.5f;
     private float timeSinceLastUpdate = 0f;
     
     private void Start()
     {
         devSettings = DevelopmentSettings.Instance;
+        questValidator = QuestBuildValidator.Instance;
+        
         if (devSettings == null)
         {
             Debug.LogError("DevelopmentSettings not found in scene!");
+            return;
+        }
+        
+        if (questValidator == null)
+        {
+            Debug.LogError("QuestBuildValidator not found in scene!");
             return;
         }
         
@@ -204,6 +221,52 @@ public class DebugMenu : MonoBehaviour
                 UpdateUIState();
             });
         }
+        
+        // Quest Testing UI setup
+        if (validateBuildButton != null)
+        {
+            validateBuildButton.onClick.AddListener(() => {
+                questValidator.ValidateBuildSettings();
+                UpdateBuildStatus();
+            });
+        }
+        
+        if (runPerformanceTestButton != null)
+        {
+            runPerformanceTestButton.onClick.AddListener(() => {
+                questValidator.RunPerformanceTest();
+            });
+        }
+        
+        if (passthroughTestToggle != null)
+        {
+            passthroughTestToggle.onValueChanged.AddListener((value) => {
+                // Toggle passthrough test mode
+                if (value)
+                {
+                    StartPassthroughTest();
+                }
+                else
+                {
+                    StopPassthroughTest();
+                }
+            });
+        }
+        
+        if (handTrackingTestToggle != null)
+        {
+            handTrackingTestToggle.onValueChanged.AddListener((value) => {
+                // Toggle hand tracking test mode
+                if (value)
+                {
+                    StartHandTrackingTest();
+                }
+                else
+                {
+                    StopHandTrackingTest();
+                }
+            });
+        }
     }
     
     private void UpdateUIState()
@@ -277,6 +340,8 @@ public class DebugMenu : MonoBehaviour
         {
             motionSensitivityTestToggle.isOn = devSettings.enableMotionSensitivityTest;
         }
+        
+        UpdateBuildStatus();
     }
     
     private void UpdatePerformanceDisplay()
@@ -307,6 +372,87 @@ public class DebugMenu : MonoBehaviour
             float intensity = Mathf.PingPong(Time.time * devSettings.overstimulationIntensity, 1f);
             overstimulationText.text = $"Overstimulation: {intensity:F2}";
         }
+    }
+    
+    private void UpdateBuildStatus()
+    {
+        if (buildStatusText != null)
+        {
+            // Check for common Quest build issues
+            var issues = new List<string>();
+            
+            #if UNITY_EDITOR
+            // Check XR Plugin Management
+            if (!PackageManager.PackageExists("com.unity.xr.management"))
+            {
+                issues.Add("Missing XR Plugin Management");
+            }
+            
+            // Check Oculus XR Plugin
+            if (!PackageManager.PackageExists("com.unity.xr.oculus"))
+            {
+                issues.Add("Missing Oculus XR Plugin");
+            }
+            
+            // Check Meta XR SDK
+            if (!PackageManager.PackageExists("com.meta.xr.sdk"))
+            {
+                issues.Add("Missing Meta XR SDK");
+            }
+            
+            // Check Android settings
+            var androidSettings = PlayerSettings.GetPlatformSettings<AndroidSettings>("Android");
+            if (androidSettings != null)
+            {
+                if (androidSettings.targetArchitectures != AndroidArchitecture.ARM64)
+                {
+                    issues.Add("Incorrect target architecture");
+                }
+                
+                if (androidSettings.minSdkVersion < AndroidSdkVersions.AndroidApiLevel24)
+                {
+                    issues.Add("SDK version too low");
+                }
+            }
+            #endif
+            
+            if (issues.Count > 0)
+            {
+                buildStatusText.text = "Build Status: Issues Found\n" + string.Join("\n", issues);
+                buildStatusText.color = Color.red;
+            }
+            else
+            {
+                buildStatusText.text = "Build Status: Ready for Quest 3";
+                buildStatusText.color = Color.green;
+            }
+        }
+    }
+    
+    private void StartPassthroughTest()
+    {
+        // Test passthrough functionality
+        Debug.Log("Starting Passthrough Test...");
+        // Add passthrough test logic here
+    }
+    
+    private void StopPassthroughTest()
+    {
+        Debug.Log("Stopping Passthrough Test...");
+        // Clean up passthrough test
+    }
+    
+    private void StartHandTrackingTest()
+    {
+        // Test hand tracking functionality
+        Debug.Log("Starting Hand Tracking Test...");
+        // Add hand tracking test logic here
+    }
+    
+    private void StopHandTrackingTest()
+    {
+        Debug.Log("Stopping Hand Tracking Test...");
+        // Clean up hand tracking test
     }
     
     public void ToggleDebugMenu()
