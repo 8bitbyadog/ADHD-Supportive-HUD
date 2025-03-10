@@ -21,6 +21,21 @@ public class DebugMenu : MonoBehaviour
     public TextMeshProUGUI fpsText;
     public TextMeshProUGUI memoryText;
     
+    [Header("ADHD Testing")]
+    public Toggle focusTestingToggle;
+    public Slider focusTestDurationSlider;
+    public Toggle overstimulationTestToggle;
+    public Slider overstimulationIntensitySlider;
+    public Button spawnOverflowTasksButton;
+    public Toggle uiStressTestToggle;
+    public Slider uiUpdateFrequencySlider;
+    public Toggle colorContrastTestToggle;
+    public Toggle motionSensitivityTestToggle;
+    
+    [Header("Focus Metrics")]
+    public TextMeshProUGUI focusLevelText;
+    public TextMeshProUGUI overstimulationText;
+    
     private DevelopmentSettings devSettings;
     private float updateInterval = 0.5f;
     private float timeSinceLastUpdate = 0f;
@@ -46,6 +61,7 @@ public class DebugMenu : MonoBehaviour
         if (timeSinceLastUpdate >= updateInterval)
         {
             UpdatePerformanceDisplay();
+            UpdateFocusMetrics();
             timeSinceLastUpdate = 0f;
         }
     }
@@ -120,6 +136,74 @@ public class DebugMenu : MonoBehaviour
                 }
             });
         }
+        
+        if (focusTestingToggle != null)
+        {
+            focusTestingToggle.onValueChanged.AddListener((value) => {
+                devSettings.ToggleFocusTesting();
+                UpdateUIState();
+            });
+        }
+        
+        if (focusTestDurationSlider != null)
+        {
+            focusTestDurationSlider.onValueChanged.AddListener((value) => {
+                devSettings.focusTestDuration = value;
+            });
+        }
+        
+        if (overstimulationTestToggle != null)
+        {
+            overstimulationTestToggle.onValueChanged.AddListener((value) => {
+                devSettings.ToggleOverstimulationTest();
+                UpdateUIState();
+            });
+        }
+        
+        if (overstimulationIntensitySlider != null)
+        {
+            overstimulationIntensitySlider.onValueChanged.AddListener((value) => {
+                devSettings.overstimulationIntensity = value;
+            });
+        }
+        
+        if (spawnOverflowTasksButton != null)
+        {
+            spawnOverflowTasksButton.onClick.AddListener(() => {
+                devSettings.SpawnOverflowTasks();
+            });
+        }
+        
+        if (uiStressTestToggle != null)
+        {
+            uiStressTestToggle.onValueChanged.AddListener((value) => {
+                devSettings.ToggleUIStressTest();
+                UpdateUIState();
+            });
+        }
+        
+        if (uiUpdateFrequencySlider != null)
+        {
+            uiUpdateFrequencySlider.onValueChanged.AddListener((value) => {
+                devSettings.uiUpdateFrequency = value;
+            });
+        }
+        
+        if (colorContrastTestToggle != null)
+        {
+            colorContrastTestToggle.onValueChanged.AddListener((value) => {
+                devSettings.enableColorContrastTest = value;
+                UpdateUIState();
+            });
+        }
+        
+        if (motionSensitivityTestToggle != null)
+        {
+            motionSensitivityTestToggle.onValueChanged.AddListener((value) => {
+                devSettings.enableMotionSensitivityTest = value;
+                UpdateUIState();
+            });
+        }
     }
     
     private void UpdateUIState()
@@ -153,6 +237,46 @@ public class DebugMenu : MonoBehaviour
         {
             performanceMetricsToggle.isOn = devSettings.enablePerformanceMetrics;
         }
+        
+        if (focusTestingToggle != null)
+        {
+            focusTestingToggle.isOn = devSettings.enableFocusTesting;
+        }
+        
+        if (focusTestDurationSlider != null)
+        {
+            focusTestDurationSlider.value = devSettings.focusTestDuration;
+        }
+        
+        if (overstimulationTestToggle != null)
+        {
+            overstimulationTestToggle.isOn = devSettings.enableOverstimulationTest;
+        }
+        
+        if (overstimulationIntensitySlider != null)
+        {
+            overstimulationIntensitySlider.value = devSettings.overstimulationIntensity;
+        }
+        
+        if (uiStressTestToggle != null)
+        {
+            uiStressTestToggle.isOn = devSettings.enableUIStressTest;
+        }
+        
+        if (uiUpdateFrequencySlider != null)
+        {
+            uiUpdateFrequencySlider.value = devSettings.uiUpdateFrequency;
+        }
+        
+        if (colorContrastTestToggle != null)
+        {
+            colorContrastTestToggle.isOn = devSettings.enableColorContrastTest;
+        }
+        
+        if (motionSensitivityTestToggle != null)
+        {
+            motionSensitivityTestToggle.isOn = devSettings.enableMotionSensitivityTest;
+        }
     }
     
     private void UpdatePerformanceDisplay()
@@ -167,6 +291,21 @@ public class DebugMenu : MonoBehaviour
         {
             float memoryMB = SystemInfo.systemMemorySize;
             memoryText.text = $"Memory: {memoryMB:F1} MB";
+        }
+    }
+    
+    private void UpdateFocusMetrics()
+    {
+        if (focusLevelText != null && devSettings.enableFocusTesting)
+        {
+            float focusLevel = Mathf.PingPong(Time.time, 1f);
+            focusLevelText.text = $"Focus Level: {focusLevel:F2}";
+        }
+        
+        if (overstimulationText != null && devSettings.enableOverstimulationTest)
+        {
+            float intensity = Mathf.PingPong(Time.time * devSettings.overstimulationIntensity, 1f);
+            overstimulationText.text = $"Overstimulation: {intensity:F2}";
         }
     }
     

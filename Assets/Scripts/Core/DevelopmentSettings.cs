@@ -23,6 +23,20 @@ public class DevelopmentSettings : MonoBehaviour
     public bool showHandTrackingPoints = false;
     public bool enableHUDDebugMode = false;
     
+    [Header("ADHD-Specific Testing")]
+    public bool enableFocusTesting = false;
+    public float focusTestDuration = 5f;
+    public bool enableOverstimulationTest = false;
+    public float overstimulationIntensity = 1f;
+    public bool enableTaskOverflowTest = false;
+    public int overflowTaskCount = 10;
+    
+    [Header("UI Testing")]
+    public bool enableUIStressTest = false;
+    public float uiUpdateFrequency = 0.5f;
+    public bool enableColorContrastTest = false;
+    public bool enableMotionSensitivityTest = false;
+    
     private static DevelopmentSettings instance;
     public static DevelopmentSettings Instance => instance;
     
@@ -68,6 +82,26 @@ public class DevelopmentSettings : MonoBehaviour
         {
             StartPerformanceMonitoring();
         }
+        
+        if (enableFocusTesting)
+        {
+            StartFocusTesting();
+        }
+        
+        if (enableOverstimulationTest)
+        {
+            StartOverstimulationTest();
+        }
+        
+        if (enableTaskOverflowTest)
+        {
+            SpawnOverflowTasks();
+        }
+        
+        if (enableUIStressTest)
+        {
+            StartUIStressTest();
+        }
     }
     
     private void SpawnTestTasks()
@@ -106,6 +140,65 @@ public class DevelopmentSettings : MonoBehaviour
         }
     }
     
+    private void StartFocusTesting()
+    {
+        StartCoroutine(FocusTest());
+    }
+    
+    private System.Collections.IEnumerator FocusTest()
+    {
+        while (enableFocusTesting)
+        {
+            // Simulate focus changes
+            float focusLevel = Mathf.PingPong(Time.time, 1f);
+            Debug.Log($"Focus Level: {focusLevel:F2}");
+            yield return new WaitForSeconds(focusTestDuration);
+        }
+    }
+    
+    private void StartOverstimulationTest()
+    {
+        StartCoroutine(OverstimulationTest());
+    }
+    
+    private System.Collections.IEnumerator OverstimulationTest()
+    {
+        while (enableOverstimulationTest)
+        {
+            // Simulate overstimulation effects
+            float intensity = Mathf.PingPong(Time.time * overstimulationIntensity, 1f);
+            Debug.Log($"Overstimulation Intensity: {intensity:F2}");
+            yield return new WaitForSeconds(0.5f);
+        }
+    }
+    
+    private void SpawnOverflowTasks()
+    {
+        var taskManager = FindObjectOfType<TaskManager>();
+        if (taskManager != null)
+        {
+            for (int i = 0; i < overflowTaskCount; i++)
+            {
+                taskManager.AddTask($"Overflow Task {i + 1}", $"Testing task overflow with high priority task {i + 1}");
+            }
+        }
+    }
+    
+    private void StartUIStressTest()
+    {
+        StartCoroutine(UIStressTest());
+    }
+    
+    private System.Collections.IEnumerator UIStressTest()
+    {
+        while (enableUIStressTest)
+        {
+            // Simulate rapid UI updates
+            Debug.Log("UI Stress Test Update");
+            yield return new WaitForSeconds(uiUpdateFrequency);
+        }
+    }
+    
     public void ToggleDevelopmentMode()
     {
         isDevelopmentMode = !isDevelopmentMode;
@@ -128,5 +221,32 @@ public class DevelopmentSettings : MonoBehaviour
     {
         enableHUDDebugMode = !enableHUDDebugMode;
         // Update HUD debug features
+    }
+    
+    public void ToggleFocusTesting()
+    {
+        enableFocusTesting = !enableFocusTesting;
+        if (enableFocusTesting)
+        {
+            StartFocusTesting();
+        }
+    }
+    
+    public void ToggleOverstimulationTest()
+    {
+        enableOverstimulationTest = !enableOverstimulationTest;
+        if (enableOverstimulationTest)
+        {
+            StartOverstimulationTest();
+        }
+    }
+    
+    public void ToggleUIStressTest()
+    {
+        enableUIStressTest = !enableUIStressTest;
+        if (enableUIStressTest)
+        {
+            StartUIStressTest();
+        }
     }
 } 
