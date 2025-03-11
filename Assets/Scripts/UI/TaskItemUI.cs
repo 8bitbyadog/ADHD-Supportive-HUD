@@ -171,7 +171,7 @@ public class TaskItemUI : MonoBehaviour
     {
         if (_task == null || _taskManager == null || _task.isCompleted)
             return;
-            
+        
         _taskManager.CompleteTask(_task.id);
         
         if (completionEffect != null)
@@ -191,7 +191,7 @@ public class TaskItemUI : MonoBehaviour
     {
         if (_task == null || _taskManager == null)
             return;
-            
+        
         _taskManager.RemoveTask(_task.id);
         
         OnDeleted?.Invoke(this);
@@ -211,10 +211,12 @@ public class TaskItemUI : MonoBehaviour
                 _taskManager.CompleteTask(_task.id);
             else
             {
+                // We need to manually update the task since TaskManager doesn't have an "uncomplete" method
                 _taskManager.UpdateTask(_task.id, progress: 0f);
                 _task.isCompleted = false;
                 _task.completionTime = null;
                 
+                // Update the UI
                 UpdateUI();
             }
         }
