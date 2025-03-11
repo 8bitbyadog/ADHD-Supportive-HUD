@@ -9,15 +9,19 @@ using UnityEngine.XR.Interaction.Toolkit;
 /// </summary>
 public class TaskItemUI : MonoBehaviour
 {
-    [Header("References")]
+    [Header("UI References")]
     [SerializeField] private TextMeshProUGUI titleText;
     [SerializeField] private TextMeshProUGUI descriptionText;
     [SerializeField] private Image priorityIndicator;
     [SerializeField] private Image progressBar;
     [SerializeField] private Button completeButton;
     [SerializeField] private Button deleteButton;
-    [SerializeField] private GameObject completionParticles;
-    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private Toggle completedToggle;
+    
+    [Header("Visual Feedback")]
+    [SerializeField] private GameObject completionEffect;
+    [SerializeField] private float progressAnimationDuration = 0.5f;
+    [SerializeField] private AnimationCurve progressCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
     
     [Header("Priority Colors")]
     [SerializeField] private Color lowPriorityColor = new Color(0.5f, 0.8f, 0.5f);
@@ -25,29 +29,25 @@ public class TaskItemUI : MonoBehaviour
     [SerializeField] private Color highPriorityColor = new Color(0.8f, 0.8f, 0.5f);
     [SerializeField] private Color urgentPriorityColor = new Color(0.8f, 0.5f, 0.5f);
     
-    [Header("Animation")]
-    [SerializeField] private float progressAnimationDuration = 0.5f;
-    [SerializeField] private AnimationCurve progressAnimationCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
-    
     [Header("Interaction")]
     [SerializeField] private XRGrabInteractable grabInteractable;
     [SerializeField] private float grabScale = 1.1f;
     [SerializeField] private float grabDuration = 0.2f;
     
+    // Events
+    public event Action<TaskItemUI> OnCompleted;
+    public event Action<TaskItemUI> OnDeleted;
+    
     private TaskManager.Task _task;
     private TaskManager _taskManager;
-    private float _targetProgress;
-    private float _currentProgress;
-    private float _progressAnimationTime;
-    private bool _isAnimatingProgress;
+    private float _targetProgress = 0f;
+    private float _displayedProgress = 0f;
+    private bool _isAnimatingProgress = false;
+    private float _progressAnimationTime = 0f;
     private Vector3 _originalScale;
     private Vector3 _originalPosition;
     private Quaternion _originalRotation;
     private bool _isGrabbed;
-    
-    // Events
-    public Action<TaskItemUI> OnTaskCompleted;
-    public Action<TaskItemUI> OnTaskDeleted;
     
     private void Awake()
     {
@@ -78,6 +78,9 @@ public class TaskItemUI : MonoBehaviour
         {
             deleteButton.onClick.AddListener(DeleteTask);
         }
+        
+        if (completedToggle != null)
+            completedToggle.onValueChanged.AddListener(OnCompletedToggleChanged);
     }
     
     private void Update()
@@ -85,27 +88,22 @@ public class TaskItemUI : MonoBehaviour
         if (_isAnimatingProgress)
         {
             _progressAnimationTime += Time.deltaTime;
-            float normalizedTime = Mathf.Clamp01(_progressAnimationTime / progressAnimationDuration);
-            float curveValue = progressAnimationCurve.Evaluate(normalizedTime);
-            _currentProgress = Mathf.Lerp(_currentProgress, _targetProgress, curveValue);
+            float t = Mathf.Clamp01(_progressAnimationTime / progressAnimationDuration);
+            float curveT = progressCurve.Evaluate(t);
+            
+            _displayedProgress = Mathf.Lerp(_displayedProgress, _targetProgress, curveT);
             
             if (progressBar != null)
-            {
-                progressBar.fillAmount = _currentProgress;
-            }
-            
-            if (Mathf.Approximately(normalizedTime, 1f))
-            {
+                progressBar.fillAmount = _displayedProgress;
+                
+            if (Mathf.Approximately(t, 1f))
                 _isAnimatingProgress = false;
-            }
         }
     }
     
     /// <summary>
-    /// Initializes the task item with data
+    /// Initialize the task item with data
     /// </summary>
-    /// <param name="task">Task data</param>
-    /// <param name="taskManager">Task manager reference</param>
     public void Initialize(TaskManager.Task task, TaskManager taskManager)
     {
         _task = task;
@@ -115,18 +113,16 @@ public class TaskItemUI : MonoBehaviour
     }
     
     /// <summary>
-    /// Updates the UI based on the current task data
+    /// Update the UI with current task data
     /// </summary>
     public void UpdateUI()
     {
         if (_task == null)
             return;
-        
+            
         if (titleText != null)
-        {
             titleText.text = _task.title;
-        }
-        
+            
         if (descriptionText != null)
         {
             descriptionText.text = _task.description;
@@ -134,23 +130,23 @@ public class TaskItemUI : MonoBehaviour
         }
         
         if (priorityIndicator != null)
-        {
             priorityIndicator.color = GetPriorityColor(_task.priority);
-        }
-        
+            
         SetProgress(_task.progress);
         
+        if (completedToggle != null)
+            completedToggle.isOn = _task.isCompleted;
+            
         if (completeButton != null)
-        {
             completeButton.gameObject.SetActive(!_task.isCompleted);
-        }
+            
+        if (completionEffect != null)
+            completionEffect.SetActive(_task.isCompleted);
     }
     
     /// <summary>
-    /// Sets the progress of the task
+    /// Set the progress with optional animation
     /// </summary>
-    /// <param name="progress">Progress value (0-1)</param>
-    /// <param name="animate">Whether to animate the progress change</param>
     public void SetProgress(float progress, bool animate = true)
     {
         _targetProgress = Mathf.Clamp01(progress);
@@ -162,64 +158,71 @@ public class TaskItemUI : MonoBehaviour
         }
         else
         {
-            _currentProgress = _targetProgress;
+            _displayedProgress = _targetProgress;
             if (progressBar != null)
-            {
-                progressBar.fillAmount = _currentProgress;
-            }
+                progressBar.fillAmount = _displayedProgress;
         }
     }
     
     /// <summary>
-    /// Completes the task
+    /// Complete the task
     /// </summary>
     public void CompleteTask()
     {
-        if (_task == null || _task.isCompleted || _taskManager == null)
+        if (_task == null || _taskManager == null || _task.isCompleted)
             return;
-        
+            
         _taskManager.CompleteTask(_task.id);
         
-        // Play completion effects
-        if (completionParticles != null)
-        {
-            completionParticles.SetActive(true);
-        }
-        
-        if (audioSource != null)
-        {
-            audioSource.Play();
-        }
-        
-        // Update UI
+        if (completionEffect != null)
+            completionEffect.SetActive(true);
+            
         SetProgress(1f, true);
         
-        if (completeButton != null)
-        {
-            completeButton.gameObject.SetActive(false);
-        }
+        UpdateUI();
         
-        OnTaskCompleted?.Invoke(this);
+        OnCompleted?.Invoke(this);
     }
     
     /// <summary>
-    /// Deletes the task
+    /// Delete the task
     /// </summary>
     public void DeleteTask()
     {
         if (_task == null || _taskManager == null)
             return;
-        
+            
         _taskManager.RemoveTask(_task.id);
         
-        OnTaskDeleted?.Invoke(this);
+        OnDeleted?.Invoke(this);
     }
     
     /// <summary>
-    /// Gets the color for a priority level
+    /// Called when the completed toggle is changed
     /// </summary>
-    /// <param name="priority">Priority level</param>
-    /// <returns>Color for the priority</returns>
+    private void OnCompletedToggleChanged(bool isCompleted)
+    {
+        if (_task == null || _taskManager == null)
+            return;
+            
+        if (isCompleted != _task.isCompleted)
+        {
+            if (isCompleted)
+                _taskManager.CompleteTask(_task.id);
+            else
+            {
+                _taskManager.UpdateTask(_task.id, progress: 0f);
+                _task.isCompleted = false;
+                _task.completionTime = null;
+                
+                UpdateUI();
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Get the color for a priority level
+    /// </summary>
     private Color GetPriorityColor(TaskManager.TaskPriority priority)
     {
         switch (priority)

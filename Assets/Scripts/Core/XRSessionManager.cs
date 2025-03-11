@@ -2,7 +2,6 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.XR;
 using UnityEngine.XR.Management;
-using Unity.XR.Oculus;
 
 /// <summary>
 /// Manages the XR session lifecycle for Meta Quest devices
@@ -79,6 +78,9 @@ public class XRSessionManager : MonoBehaviour
             // Configure performance settings
             ConfigurePerformanceSettings();
             
+            // Initialize passthrough
+            InitializePassthrough();
+            
             _isInitialized = true;
             LogMessage("XR initialization complete");
         }
@@ -107,44 +109,84 @@ public class XRSessionManager : MonoBehaviour
     
     private void ConfigurePerformanceSettings()
     {
+        // Set refresh rate if supported
         if (useHighRefreshRate)
         {
-            // Try to set 90Hz refresh rate if supported
+            LogMessage("Setting high refresh rate");
+            // Get current refresh rate
+            float currentRate = XRDevice.refreshRate;
+            LogMessage($"Current refresh rate: {currentRate}Hz");
+            
+            // Set to highest available
             if (XRDevice.refreshRate < 90)
             {
-                LogMessage("Setting high refresh rate (90Hz)");
-                OculusSettings settings = GetOculusSettings();
-                if (settings != null)
+                try
                 {
-                    settings.TargetRefreshRate = OculusSettings.SupportedRefreshRates.RefreshRate90Hz;
+                    // For Quest 3
+                    #if UNITY_ANDROID && !UNITY_EDITOR
+                    if (OVRPlugin.systemDisplayFrequenciesAvailable.Contains(90f))
+                    {
+                        OVRPlugin.systemDisplayFrequency = 90f;
+                        LogMessage("Set refresh rate to 90Hz");
+                    }
+                    else if (OVRPlugin.systemDisplayFrequenciesAvailable.Contains(72f))
+                    {
+                        OVRPlugin.systemDisplayFrequency = 72f;
+                        LogMessage("Set refresh rate to 72Hz");
+                    }
+                    #endif
+                }
+                catch (System.Exception e)
+                {
+                    LogError($"Failed to set refresh rate: {e.Message}");
                 }
             }
         }
         
+        // Enable dynamic foveation for performance
         if (useDynamicFoveation)
         {
-            // Enable dynamic foveation for performance
             LogMessage("Enabling dynamic foveation");
-            OculusSettings settings = GetOculusSettings();
-            if (settings != null)
+            
+            try
             {
-                settings.UseDynamicFoveation = true;
+                #if UNITY_ANDROID && !UNITY_EDITOR
+                OVRManager.foveatedRenderingLevel = OVRManager.FoveatedRenderingLevel.High;
+                OVRManager.useDynamicFoveatedRendering = true;
+                #endif
+            }
+            catch (System.Exception e)
+            {
+                LogError($"Failed to enable dynamic foveation: {e.Message}");
             }
         }
     }
     
-    private OculusSettings GetOculusSettings()
+    private void InitializePassthrough()
     {
-        OculusSettings settings = null;
+        LogMessage("Initializing passthrough");
         
-        // Try to get the Oculus settings
-        UnityEngine.Object[] assets = Resources.FindObjectsOfTypeAll(typeof(OculusSettings));
-        if (assets.Length > 0)
+        try
         {
-            settings = assets[0] as OculusSettings;
+            #if UNITY_ANDROID && !UNITY_EDITOR
+            // Enable passthrough via OVRManager if available
+            if (OVRManager.instance != null)
+            {
+                OVRManager.instance.isPassthroughEnabled = true;
+                LogMessage("Passthrough enabled via OVRManager");
+            }
+            else
+            {
+                LogMessage("OVRManager instance not found, passthrough may not be available");
+            }
+            #else
+            LogMessage("Passthrough not available in Editor mode");
+            #endif
         }
-        
-        return settings;
+        catch (System.Exception e)
+        {
+            LogError($"Failed to initialize passthrough: {e.Message}");
+        }
     }
     
     private void OnApplicationPause(bool pauseStatus)
@@ -167,6 +209,9 @@ public class XRSessionManager : MonoBehaviour
             if (xrManager != null && xrManager.activeLoader != null)
             {
                 xrManager.StartSubsystems();
+                
+                // Reinitialize passthrough on resume
+                InitializePassthrough();
             }
         }
     }

@@ -1,10 +1,9 @@
 using System.Collections;
 using UnityEngine;
-using Unity.XR.Oculus;
 
 /// <summary>
 /// Manages the passthrough AR functionality for Meta Quest devices
-/// Handles initialization, configuration, and visual effects
+/// Handles configuration and visual effects for passthrough mode
 /// </summary>
 public class PassthroughManager : MonoBehaviour
 {
@@ -95,23 +94,59 @@ public class PassthroughManager : MonoBehaviour
     /// <param name="opacity">Opacity value (0-1)</param>
     public void SetPassthroughOpacity(float opacity)
     {
-        if (!OculusSettings.IsOVRPluginActive())
-        {
-            LogError("OVR Plugin is not active. Cannot set passthrough opacity.");
-            return;
-        }
-        
         try
         {
-            OculusSettings.EnablePassthrough(opacity > 0);
-            
-            if (opacity > 0)
+            #if UNITY_ANDROID && !UNITY_EDITOR
+            if (OVRManager.instance != null)
             {
-                // Set passthrough parameters
-                OculusSettings.SetPassthroughOpacity(opacity);
-                OculusSettings.SetPassthroughBrightness(passthroughBrightness);
-                OculusSettings.SetPassthroughContrast(passthroughContrast);
+                OVRManager.instance.isPassthroughEnabled = opacity > 0;
+                
+                if (opacity > 0)
+                {
+                    // Set passthrough parameters using OculusPassthroughLayer if available
+                    var passthroughLayer = FindObjectOfType<OVRPassthroughLayer>();
+                    if (passthroughLayer != null)
+                    {
+                        var currentStyle = passthroughLayer.colorMapEditorType;
+                        var colorAdjustment = new OVRPassthroughLayer.ColorMapEditorColorAdjustment();
+                        
+                        colorAdjustment.Brightness = passthroughBrightness;
+                        colorAdjustment.Contrast = passthroughContrast;
+                        colorAdjustment.Posterize = 0;
+                        colorAdjustment.Saturation = 0;
+                        
+                        passthroughLayer.SetColorMapControls(colorAdjustment);
+                        passthroughLayer.edgeRenderingEnabled = false;
+                        
+                        // Use opacity value
+                        var currentColor = passthroughLayer.edgeColor;
+                        currentColor.a = opacity;
+                        passthroughLayer.edgeColor = currentColor;
+                    }
+                    else
+                    {
+                        LogMessage("No OVRPassthroughLayer found. Creating one.");
+                        
+                        // Create a new GameObject with OVRPassthroughLayer if it doesn't exist
+                        var passthroughObject = new GameObject("PassthroughLayer");
+                        passthroughLayer = passthroughObject.AddComponent<OVRPassthroughLayer>();
+                        
+                        // Configure the layer
+                        var colorAdjustment = new OVRPassthroughLayer.ColorMapEditorColorAdjustment();
+                        colorAdjustment.Brightness = passthroughBrightness;
+                        colorAdjustment.Contrast = passthroughContrast;
+                        
+                        passthroughLayer.SetColorMapControls(colorAdjustment);
+                    }
+                }
             }
+            else
+            {
+                LogError("OVRManager instance not found. Cannot set passthrough opacity.");
+            }
+            #else
+            LogMessage($"Setting passthrough opacity to {opacity} (Editor mode)");
+            #endif
         }
         catch (System.Exception e)
         {
@@ -133,8 +168,17 @@ public class PassthroughManager : MonoBehaviour
         {
             try
             {
-                OculusSettings.SetPassthroughBrightness(brightness);
-                OculusSettings.SetPassthroughContrast(contrast);
+                #if UNITY_ANDROID && !UNITY_EDITOR
+                var passthroughLayer = FindObjectOfType<OVRPassthroughLayer>();
+                if (passthroughLayer != null)
+                {
+                    var colorAdjustment = new OVRPassthroughLayer.ColorMapEditorColorAdjustment();
+                    colorAdjustment.Brightness = brightness;
+                    colorAdjustment.Contrast = contrast;
+                    
+                    passthroughLayer.SetColorMapControls(colorAdjustment);
+                }
+                #endif
             }
             catch (System.Exception e)
             {
