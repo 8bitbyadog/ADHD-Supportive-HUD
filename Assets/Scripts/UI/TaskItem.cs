@@ -4,6 +4,15 @@ using TMPro;
 using UnityEngine.EventSystems;
 using System;
 
+// Define TaskPriority enum here to avoid conflict
+public enum TaskPriority
+{
+    Low,
+    Medium,
+    High,
+    Urgent
+}
+
 public class TaskItem : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     [Header("UI Components")]
