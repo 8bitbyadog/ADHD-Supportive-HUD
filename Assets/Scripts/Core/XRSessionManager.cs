@@ -1,21 +1,19 @@
 using System.Collections;
 using UnityEngine;
-using UnityEngine.XR;
-using UnityEngine.XR.Management;
 
 /// <summary>
-/// Manages the XR session lifecycle for Meta Quest devices
-/// Handles initialization, state transitions, and recovery
+/// Manages the XR session setup, initialization and configuration
+/// Handles device performance settings and features like passthrough
 /// </summary>
 public class XRSessionManager : MonoBehaviour
 {
     [Header("Session Settings")]
-    [SerializeField] private float initializationDelay = 0.5f;
+    [SerializeField] private bool initializeOnStart = true;
     [SerializeField] private int maxRetryAttempts = 3;
     [SerializeField] private float retryDelay = 2.0f;
     
     [Header("Performance Settings")]
-    [SerializeField] private bool useHighRefreshRate = true;
+    [SerializeField] private bool optimizeForMobileVR = true;
     [SerializeField] private bool useDynamicFoveation = true;
     
     [Header("Debug")]
@@ -26,205 +24,211 @@ public class XRSessionManager : MonoBehaviour
     
     private void Awake()
     {
-        DontDestroyOnLoad(this.gameObject);
+        DontDestroyOnLoad(this);
     }
     
     private void Start()
     {
-        StartCoroutine(InitializeXR());
+        if (initializeOnStart)
+        {
+            StartCoroutine(InitializeXR());
+        }
     }
     
     private IEnumerator InitializeXR()
     {
-        LogMessage("Starting XR initialization sequence");
+        LogMessage("Initializing XR session...");
         
-        // Wait a short delay before initialization to ensure system is ready
-        yield return new WaitForSeconds(initializationDelay);
-        
-        // Initialize XR Plugin Management
-        if (XRGeneralSettings.Instance == null)
+        try
         {
-            LogError("XR General Settings instance is null. Make sure XR Plugin Management is installed.");
-            yield break;
-        }
-        
-        var xrManager = XRGeneralSettings.Instance.Manager;
-        if (xrManager == null)
-        {
-            LogError("XR Manager instance is null. Make sure XR Plugin Management is configured correctly.");
-            yield break;
-        }
-        
-        // Start the XR subsystems
-        if (!xrManager.isInitializationComplete)
-        {
-            LogMessage("Initializing XR subsystems");
-            xrManager.InitializeLoaderSync();
-            
-            if (!xrManager.isInitializationComplete)
+            #if UNITY_ANDROID && !UNITY_EDITOR
+            // Mobile XR initialization
+            if (optimizeForMobileVR)
             {
-                LogError("XR initialization failed. Retrying...");
-                yield return StartCoroutine(RetryInitialization());
-                yield break;
+                ConfigurePerformanceSettings();
             }
-        }
-        
-        // Start the XR subsystems
-        if (xrManager.activeLoader != null)
-        {
-            LogMessage("Starting XR subsystems");
-            xrManager.StartSubsystems();
             
-            // Configure performance settings
-            ConfigurePerformanceSettings();
-            
-            // Initialize passthrough
-            InitializePassthrough();
-            
+            // Check if Oculus Integration is available
+            var ovrManager = FindObjectOfType<OVRManager>();
+            if (ovrManager != null)
+            {
+                // Configure OVRManager settings if available
+                ovrManager.trackingOriginType = OVRManager.TrackingOrigin.FloorLevel;
+                ovrManager.useRecommendedMSAALevel = true;
+                ovrManager.useDynamicFixedFoveatedRendering = useDynamicFoveation;
+                
+                // Initialize passthrough if device supports it
+                if (OVRManager.IsPassthroughSupported())
+                {
+                    yield return new WaitForSeconds(0.5f); // Brief delay for OVR to initialize
+                    InitializePassthrough();
+                }
+                else
+                {
+                    LogMessage("Passthrough is not supported on this device");
+                }
+                
+                _isInitialized = true;
+                LogMessage("XR session initialized successfully");
+            }
+            else
+            {
+                LogError("OVRManager not found in the scene. Some features may not work properly.");
+                _isInitialized = false;
+                
+                if (_currentRetryAttempt < maxRetryAttempts)
+                {
+                    yield return StartCoroutine(RetryInitialization());
+                }
+            }
+            #else
+            // Editor initialization
+            LogMessage("Running in editor mode");
             _isInitialized = true;
-            LogMessage("XR initialization complete");
+            #endif
         }
-        else
+        catch (System.Exception e)
         {
-            LogError("XR Loader is null. Retrying...");
-            yield return StartCoroutine(RetryInitialization());
+            LogError($"Error initializing XR session: {e.Message}");
+            _isInitialized = false;
+            
+            if (_currentRetryAttempt < maxRetryAttempts)
+            {
+                yield return StartCoroutine(RetryInitialization());
+            }
         }
     }
     
     private IEnumerator RetryInitialization()
     {
         _currentRetryAttempt++;
+        LogMessage($"Retrying initialization (Attempt {_currentRetryAttempt}/{maxRetryAttempts})...");
         
-        if (_currentRetryAttempt <= maxRetryAttempts)
+        yield return new WaitForSeconds(retryDelay);
+        
+        yield return StartCoroutine(InitializeXR());
+        
+        if (!_isInitialized && _currentRetryAttempt >= maxRetryAttempts)
         {
-            LogMessage($"Retry attempt {_currentRetryAttempt}/{maxRetryAttempts}");
-            yield return new WaitForSeconds(retryDelay);
-            yield return StartCoroutine(InitializeXR());
-        }
-        else
-        {
-            LogError($"Failed to initialize XR after {maxRetryAttempts} attempts");
+            LogError($"Failed to initialize XR session after {maxRetryAttempts} attempts.");
         }
     }
     
     private void ConfigurePerformanceSettings()
     {
-        // Set refresh rate if supported
-        if (useHighRefreshRate)
+        #if UNITY_ANDROID && !UNITY_EDITOR
+        try
         {
-            LogMessage("Setting high refresh rate");
-            // Get current refresh rate
-            float currentRate = XRDevice.refreshRate;
-            LogMessage($"Current refresh rate: {currentRate}Hz");
-            
-            // Set to highest available
-            if (XRDevice.refreshRate < 90)
+            // Set CPU/GPU performance levels (if Oculus Integration is available)
+            if (OVRManager.instance != null)
             {
-                try
+                // Set initial performance levels
+                // CPU and GPU levels range from 0 to 3 (higher = more performance, more power)
+                OVRManager.cpuLevel = 2;
+                OVRManager.gpuLevel = 2;
+                
+                // Configure fixed foveated rendering
+                if (useDynamicFoveation && OVRManager.fixedFoveatedRenderingSupported)
                 {
-                    // For Quest 3
-                    #if UNITY_ANDROID && !UNITY_EDITOR
-                    if (OVRPlugin.systemDisplayFrequenciesAvailable.Contains(90f))
-                    {
-                        OVRPlugin.systemDisplayFrequency = 90f;
-                        LogMessage("Set refresh rate to 90Hz");
-                    }
-                    else if (OVRPlugin.systemDisplayFrequenciesAvailable.Contains(72f))
-                    {
-                        OVRPlugin.systemDisplayFrequency = 72f;
-                        LogMessage("Set refresh rate to 72Hz");
-                    }
-                    #endif
-                }
-                catch (System.Exception e)
-                {
-                    LogError($"Failed to set refresh rate: {e.Message}");
+                    OVRManager.useDynamicFixedFoveatedRendering = true;
+                    LogMessage("Dynamic fixed foveated rendering enabled");
                 }
             }
-        }
-        
-        // Enable dynamic foveation for performance
-        if (useDynamicFoveation)
-        {
-            LogMessage("Enabling dynamic foveation");
             
-            try
-            {
-                #if UNITY_ANDROID && !UNITY_EDITOR
-                OVRManager.foveatedRenderingLevel = OVRManager.FoveatedRenderingLevel.High;
-                OVRManager.useDynamicFoveatedRendering = true;
-                #endif
-            }
-            catch (System.Exception e)
-            {
-                LogError($"Failed to enable dynamic foveation: {e.Message}");
-            }
+            // General performance optimizations
+            Application.targetFrameRate = 72;  // 72Hz for Quest, 90Hz for Quest 2
+            QualitySettings.vSyncCount = 0;    // VSync is handled by the XR system
+            QualitySettings.maxQueuedFrames = 1;
+            
+            // Disable unnecessary features
+            QualitySettings.anisotropicFiltering = AnisotropicFiltering.Disable;
+            QualitySettings.antiAliasing = 0;   // MSAA is handled separately
+            
+            LogMessage("Mobile VR performance settings applied");
         }
+        catch (System.Exception e)
+        {
+            LogError($"Error configuring performance settings: {e.Message}");
+        }
+        #endif
     }
     
     private void InitializePassthrough()
     {
-        LogMessage("Initializing passthrough");
-        
+        #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
-            #if UNITY_ANDROID && !UNITY_EDITOR
-            // Enable passthrough via OVRManager if available
-            if (OVRManager.instance != null)
+            var passthroughManager = FindObjectOfType<PassthroughManager>();
+            if (passthroughManager == null)
             {
-                OVRManager.instance.isPassthroughEnabled = true;
-                LogMessage("Passthrough enabled via OVRManager");
+                LogMessage("No PassthroughManager found. Creating one.");
+                
+                // Create a new GameObject with PassthroughManager if it doesn't exist
+                var passthroughObject = new GameObject("PassthroughManager");
+                passthroughObject.transform.SetParent(transform);
+                passthroughManager = passthroughObject.AddComponent<PassthroughManager>();
             }
-            else
-            {
-                LogMessage("OVRManager instance not found, passthrough may not be available");
-            }
-            #else
-            LogMessage("Passthrough not available in Editor mode");
-            #endif
+            
+            LogMessage("Passthrough initialized");
         }
         catch (System.Exception e)
         {
-            LogError($"Failed to initialize passthrough: {e.Message}");
+            LogError($"Error initializing passthrough: {e.Message}");
         }
+        #endif
     }
     
     private void OnApplicationPause(bool pauseStatus)
     {
         if (pauseStatus)
         {
-            LogMessage("Application paused, handling XR session pause");
-            // Handle session pause gracefully
-            var xrManager = XRGeneralSettings.Instance?.Manager;
-            if (xrManager != null && xrManager.activeLoader != null)
+            LogMessage("Application paused");
+            
+            #if UNITY_ANDROID && !UNITY_EDITOR
+            // Conserve power when app is paused
+            if (OVRManager.instance != null)
             {
-                xrManager.StopSubsystems();
+                // Lower CPU/GPU levels when app is in background
+                OVRManager.cpuLevel = 0;
+                OVRManager.gpuLevel = 0;
             }
+            #endif
         }
         else
         {
-            LogMessage("Application resumed, handling XR session resume");
-            // Handle session resume
-            var xrManager = XRGeneralSettings.Instance?.Manager;
-            if (xrManager != null && xrManager.activeLoader != null)
+            LogMessage("Application resumed");
+            
+            #if UNITY_ANDROID && !UNITY_EDITOR
+            // Restore performance when app resumes
+            if (!_isInitialized)
             {
-                xrManager.StartSubsystems();
-                
-                // Reinitialize passthrough on resume
-                InitializePassthrough();
+                // Re-initialize if needed
+                StartCoroutine(InitializeXR());
             }
+            else if (optimizeForMobileVR && OVRManager.instance != null)
+            {
+                // Restore CPU/GPU levels
+                OVRManager.cpuLevel = 2;
+                OVRManager.gpuLevel = 2;
+            }
+            #endif
         }
     }
     
     private void OnDestroy()
     {
-        LogMessage("Cleaning up XR session");
-        var xrManager = XRGeneralSettings.Instance?.Manager;
-        if (xrManager != null && xrManager.activeLoader != null)
+        LogMessage("XR session manager destroyed");
+        
+        #if UNITY_ANDROID && !UNITY_EDITOR
+        try
         {
-            xrManager.StopSubsystems();
-            xrManager.DeinitializeLoader();
+            // Clean up resources if needed
         }
+        catch (System.Exception e)
+        {
+            LogError($"Error during cleanup: {e.Message}");
+        }
+        #endif
     }
     
     private void LogMessage(string message)
@@ -239,4 +243,4 @@ public class XRSessionManager : MonoBehaviour
     {
         Debug.LogError($"[XRSessionManager] {message}");
     }
-} 
+}

@@ -45,12 +45,12 @@ public class TaskManager : MonoBehaviour
     }
     
     [Header("Task Settings")]
-    [SerializeField] private int maxTasks = 50;
+    [SerializeField] private bool loadTasksOnStart = true;
     [SerializeField] private bool autoSaveTasks = true;
     [SerializeField] private float autoSaveInterval = 60f; // seconds
     
     [Header("Events")]
-    public Action<Task> OnTaskAdded;
+    [SerializeField] private bool enableEvents = true;
     public Action<Task> OnTaskUpdated;
     public Action<Task> OnTaskCompleted;
     public Action<Task> OnTaskRemoved;
@@ -61,7 +61,10 @@ public class TaskManager : MonoBehaviour
     
     private void Start()
     {
-        LoadTasks();
+        if (loadTasksOnStart)
+        {
+            LoadTasks();
+        }
     }
     
     private void Update()
@@ -69,6 +72,7 @@ public class TaskManager : MonoBehaviour
         if (autoSaveTasks)
         {
             _timeSinceLastSave += Time.deltaTime;
+            
             if (_timeSinceLastSave >= autoSaveInterval)
             {
                 SaveTasks();
@@ -78,32 +82,31 @@ public class TaskManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Creates a new task
+    /// Creates a new task and adds it to the task list
     /// </summary>
     /// <param name="title">Task title</param>
-    /// <param name="description">Task description</param>
-    /// <param name="priority">Task priority</param>
-    /// <returns>The created task</returns>
+    /// <param name="description">Task description (optional)</param>
+    /// <param name="priority">Task priority (optional, defaults to Medium)</param>
+    /// <returns>The newly created task</returns>
     public Task CreateTask(string title, string description = "", TaskPriority priority = TaskPriority.Medium)
     {
-        Task task = new Task(title, description, priority);
-        _tasks.Add(task);
-        
-        if (_tasks.Count > maxTasks)
+        if (string.IsNullOrEmpty(title))
         {
-            // Remove oldest completed task if we exceed the limit
-            Task oldestCompleted = _tasks.Where(t => t.isCompleted).OrderBy(t => t.completionTime).FirstOrDefault();
-            if (oldestCompleted != null)
-            {
-                _tasks.Remove(oldestCompleted);
-            }
+            Debug.LogWarning("Cannot create task with empty title");
+            return null;
         }
         
-        OnTaskAdded?.Invoke(task);
+        var task = new Task(title, description, priority);
+        _tasks.Add(task);
         
         if (autoSaveTasks)
         {
             SaveTasks();
+        }
+        
+        if (enableEvents && OnTaskUpdated != null)
+        {
+            OnTaskUpdated(task);
         }
         
         return task;
@@ -112,100 +115,131 @@ public class TaskManager : MonoBehaviour
     /// <summary>
     /// Updates an existing task
     /// </summary>
-    /// <param name="taskId">Task ID</param>
-    /// <param name="title">New title (null to keep current)</param>
-    /// <param name="description">New description (null to keep current)</param>
-    /// <param name="priority">New priority (null to keep current)</param>
-    /// <param name="progress">New progress (-1 to keep current)</param>
-    /// <returns>True if the task was updated</returns>
+    /// <param name="taskId">ID of the task to update</param>
+    /// <param name="title">New title (null to keep unchanged)</param>
+    /// <param name="description">New description (null to keep unchanged)</param>
+    /// <param name="priority">New priority (null to keep unchanged)</param>
+    /// <param name="progress">New progress (-1 to keep unchanged)</param>
+    /// <returns>True if the task was updated successfully</returns>
     public bool UpdateTask(string taskId, string title = null, string description = null, TaskPriority? priority = null, float progress = -1)
     {
-        Task task = _tasks.FirstOrDefault(t => t.id == taskId);
+        var task = _tasks.FirstOrDefault(t => t.id == taskId);
         if (task == null)
+        {
+            Debug.LogWarning($"Cannot update task: Task with ID {taskId} not found");
             return false;
+        }
         
-        bool changed = false;
+        bool wasUpdated = false;
         
-        if (title != null && task.title != title)
+        if (title != null)
         {
             task.title = title;
-            changed = true;
+            wasUpdated = true;
         }
         
-        if (description != null && task.description != description)
+        if (description != null)
         {
             task.description = description;
-            changed = true;
+            wasUpdated = true;
         }
         
-        if (priority.HasValue && task.priority != priority.Value)
+        if (priority.HasValue)
         {
             task.priority = priority.Value;
-            changed = true;
+            wasUpdated = true;
         }
         
-        if (progress >= 0 && progress <= 1 && Math.Abs(task.progress - progress) > 0.01f)
+        if (progress >= 0)
         {
-            task.progress = progress;
-            changed = true;
+            task.progress = Mathf.Clamp01(progress);
+            wasUpdated = true;
         }
         
-        if (changed)
+        if (wasUpdated)
         {
-            OnTaskUpdated?.Invoke(task);
-            
             if (autoSaveTasks)
             {
                 SaveTasks();
             }
+            
+            if (enableEvents && OnTaskUpdated != null)
+            {
+                OnTaskUpdated(task);
+            }
         }
         
-        return changed;
+        return wasUpdated;
     }
     
     /// <summary>
-    /// Completes a task
+    /// Marks a task as completed
     /// </summary>
-    /// <param name="taskId">Task ID</param>
-    /// <returns>True if the task was completed</returns>
+    /// <param name="taskId">ID of the task to complete</param>
+    /// <returns>True if the task was completed successfully</returns>
     public bool CompleteTask(string taskId)
     {
-        Task task = _tasks.FirstOrDefault(t => t.id == taskId);
-        if (task == null || task.isCompleted)
+        var task = _tasks.FirstOrDefault(t => t.id == taskId);
+        if (task == null)
+        {
+            Debug.LogWarning($"Cannot complete task: Task with ID {taskId} not found");
             return false;
+        }
+        
+        if (task.isCompleted)
+        {
+            return false; // Already completed
+        }
         
         task.isCompleted = true;
         task.completionTime = DateTime.Now;
         task.progress = 1f;
         
-        OnTaskCompleted?.Invoke(task);
-        
         if (autoSaveTasks)
         {
             SaveTasks();
+        }
+        
+        if (enableEvents)
+        {
+            if (OnTaskUpdated != null)
+            {
+                OnTaskUpdated(task);
+            }
+            
+            if (OnTaskCompleted != null)
+            {
+                OnTaskCompleted(task);
+            }
         }
         
         return true;
     }
     
     /// <summary>
-    /// Removes a task
+    /// Removes a task from the task list
     /// </summary>
-    /// <param name="taskId">Task ID</param>
-    /// <returns>True if the task was removed</returns>
+    /// <param name="taskId">ID of the task to remove</param>
+    /// <returns>True if the task was removed successfully</returns>
     public bool RemoveTask(string taskId)
     {
-        Task task = _tasks.FirstOrDefault(t => t.id == taskId);
+        var task = _tasks.FirstOrDefault(t => t.id == taskId);
         if (task == null)
+        {
+            Debug.LogWarning($"Cannot remove task: Task with ID {taskId} not found");
             return false;
+        }
         
         _tasks.Remove(task);
-        
-        OnTaskRemoved?.Invoke(task);
         
         if (autoSaveTasks)
         {
             SaveTasks();
+        }
+        
+        if (enableEvents && OnTaskRemoved != null)
+        {
+            OnTaskRemoved(task);
         }
         
         return true;
@@ -214,105 +248,120 @@ public class TaskManager : MonoBehaviour
     /// <summary>
     /// Gets all tasks
     /// </summary>
-    /// <returns>List of all tasks</returns>
+    /// <returns>A list of all tasks</returns>
     public List<Task> GetAllTasks()
     {
         return new List<Task>(_tasks);
     }
     
     /// <summary>
-    /// Gets active (non-completed) tasks
+    /// Gets all active (non-completed) tasks
     /// </summary>
-    /// <returns>List of active tasks</returns>
+    /// <returns>A list of active tasks</returns>
     public List<Task> GetActiveTasks()
     {
         return _tasks.Where(t => !t.isCompleted).ToList();
     }
     
     /// <summary>
-    /// Gets completed tasks
+    /// Gets all completed tasks
     /// </summary>
-    /// <returns>List of completed tasks</returns>
+    /// <returns>A list of completed tasks</returns>
     public List<Task> GetCompletedTasks()
     {
         return _tasks.Where(t => t.isCompleted).ToList();
     }
     
     /// <summary>
-    /// Gets tasks by priority
+    /// Gets tasks filtered by priority
     /// </summary>
-    /// <param name="priority">Priority to filter by</param>
-    /// <returns>List of tasks with the specified priority</returns>
+    /// <param name="priority">The priority to filter by</param>
+    /// <returns>A list of tasks with the specified priority</returns>
     public List<Task> GetTasksByPriority(TaskPriority priority)
     {
         return _tasks.Where(t => t.priority == priority).ToList();
     }
     
     /// <summary>
-    /// Gets tasks by tag
+    /// Gets tasks filtered by tag
     /// </summary>
-    /// <param name="tag">Tag to filter by</param>
-    /// <returns>List of tasks with the specified tag</returns>
+    /// <param name="tag">The tag to filter by</param>
+    /// <returns>A list of tasks with the specified tag</returns>
     public List<Task> GetTasksByTag(string tag)
     {
         return _tasks.Where(t => t.tags.Contains(tag)).ToList();
     }
     
     /// <summary>
-    /// Saves tasks to PlayerPrefs
+    /// Saves all tasks to PlayerPrefs
     /// </summary>
     public void SaveTasks()
     {
         try
         {
-            string json = JsonUtility.ToJson(new TaskList { tasks = _tasks });
-            PlayerPrefs.SetString("ADHDFocusAssistant_Tasks", json);
+            var taskList = new TaskList { tasks = _tasks };
+            string json = JsonUtility.ToJson(taskList);
+            PlayerPrefs.SetString("Tasks", json);
             PlayerPrefs.Save();
+            
+            Debug.Log($"Saved {_tasks.Count} tasks to PlayerPrefs");
         }
         catch (Exception e)
         {
-            Debug.LogError($"[TaskManager] Error saving tasks: {e.Message}");
+            Debug.LogError($"Error saving tasks: {e.Message}");
         }
     }
     
     /// <summary>
-    /// Loads tasks from PlayerPrefs
+    /// Loads all tasks from PlayerPrefs
     /// </summary>
     public void LoadTasks()
     {
         try
         {
-            string json = PlayerPrefs.GetString("ADHDFocusAssistant_Tasks", "");
-            if (!string.IsNullOrEmpty(json))
+            if (PlayerPrefs.HasKey("Tasks"))
             {
-                TaskList taskList = JsonUtility.FromJson<TaskList>(json);
+                string json = PlayerPrefs.GetString("Tasks");
+                var taskList = JsonUtility.FromJson<TaskList>(json);
+                
                 if (taskList != null && taskList.tasks != null)
                 {
                     _tasks = taskList.tasks;
-                    OnTasksLoaded?.Invoke(_tasks);
+                    Debug.Log($"Loaded {_tasks.Count} tasks from PlayerPrefs");
+                    
+                    if (enableEvents && OnTasksLoaded != null)
+                    {
+                        OnTasksLoaded(_tasks);
+                    }
                 }
+            }
+            else
+            {
+                Debug.Log("No saved tasks found");
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"[TaskManager] Error loading tasks: {e.Message}");
+            Debug.LogError($"Error loading tasks: {e.Message}");
         }
     }
     
     /// <summary>
-    /// Clears all tasks
+    /// Clears all tasks from memory and PlayerPrefs
     /// </summary>
     public void ClearAllTasks()
     {
         _tasks.Clear();
-        PlayerPrefs.DeleteKey("ADHDFocusAssistant_Tasks");
+        PlayerPrefs.DeleteKey("Tasks");
         PlayerPrefs.Save();
+        Debug.Log("All tasks cleared");
     }
     
     private void OnApplicationPause(bool pauseStatus)
     {
         if (pauseStatus && autoSaveTasks)
         {
+            // Save when app is paused (backgrounded)
             SaveTasks();
         }
     }
@@ -321,6 +370,7 @@ public class TaskManager : MonoBehaviour
     {
         if (autoSaveTasks)
         {
+            // Save when app is quit
             SaveTasks();
         }
     }
@@ -330,4 +380,4 @@ public class TaskManager : MonoBehaviour
     {
         public List<Task> tasks;
     }
-} 
+}

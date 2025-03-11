@@ -3,852 +3,326 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine.UI;
 using System.Collections;
-using UnityEngine.XR.Interaction.Toolkit;
 
 /// <summary>
-/// Main manager for the HUD system
-/// Coordinates all UI components and manages the overall HUD state
+/// Manages the ADHD Focus Assistant HUD system
+/// Handles UI elements, layout, and feature coordination
 /// </summary>
 public class HUDManager : MonoBehaviour
 {
-    [Header("Theme System")]
+    [Header("Theme Settings")]
     [SerializeField] private List<HUDTheme> availableThemes;
-    [SerializeField] private ParticleSystem themeParticles;
-    [SerializeField] private float themeTransitionDuration = 1f;
-    [SerializeField] private AnimationCurve themeTransitionCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    [SerializeField] private HUDTheme defaultTheme;
+    [SerializeField] private float themeTransitionDuration = 1.0f;
     
-    [Header("Task System")]
-    [SerializeField] private GameObject taskItemPrefab;
+    [Header("Task Management")]
     [SerializeField] private Transform taskContainer;
-    [SerializeField] private float taskAnimationDuration = 0.5f;
-    [SerializeField] private ParticleSystem taskCompleteEffect;
+    [SerializeField] private GameObject taskItemPrefab;
+    [SerializeField] private Button addTaskButton;
+    [SerializeField] private TMP_InputField taskInputField;
     
-    [Header("Pomodoro System")]
+    [Header("Pomodoro Timer")]
     [SerializeField] private GameObject pomodoroDisplay;
-    [SerializeField] private List<string> breakActivities;
-    [SerializeField] private AudioClip[] ambientSounds;
-    [SerializeField] private float streakUpdateInterval = 24f; // Hours
+    [SerializeField] private TMP_Text timerText;
+    [SerializeField] private Button startPomodoroButton;
+    [SerializeField] private Button pausePomodoroButton;
     
-    [Header("Health System")]
+    [Header("Health Tracking")]
     [SerializeField] private GameObject healthDisplay;
-    [SerializeField] private GameObject breathingGuide;
-    [SerializeField] private GameObject postureReminder;
-    [SerializeField] private GameObject moodTracker;
+    [SerializeField] private Slider stressLevelSlider;
+    [SerializeField] private Button breathingGuideButton;
     
     [Header("Gamification")]
     [SerializeField] private GameObject achievementPanel;
-    [SerializeField] private GameObject statsDisplay;
-    [SerializeField] private List<Achievement> achievements;
-    [SerializeField] private float xpPerTask = 100f;
-    
-    [Header("Notification System")]
-    [SerializeField] private GameObject notificationPanel;
-    [SerializeField] private GameObject notificationPrefab;
-    [SerializeField] private float notificationDuration = 5f;
+    [SerializeField] private TMP_Text xpText;
+    [SerializeField] private Slider progressBar;
     
     [Header("Accessibility")]
-    [SerializeField] private float[] textSizeOptions = { 12f, 14f, 16f, 18f };
-    [SerializeField] private bool highContrastMode = false;
-    [SerializeField] private bool reducedMotion = false;
+    [SerializeField] private float defaultTextSize = 18f;
+    [SerializeField] private bool highContrastModeDefault = false;
+    [SerializeField] private bool reduceMotionDefault = false;
     
-    [Header("Social Features")]
-    [SerializeField] private GameObject socialPanel;
-    [SerializeField] private GameObject friendActivityFeed;
-    [SerializeField] private GameObject communityChallenges;
-
-    [Header("Core Components")]
-    [SerializeField] private XRSessionManager xrSessionManager;
-    [SerializeField] private PassthroughManager passthroughManager;
-    [SerializeField] private TaskManager taskManager;
+    private TaskManager _taskManager;
+    private ThemeManager _themeManager;
+    private PomodoroManager _pomodoroManager;
+    private AchievementSystem _achievementSystem;
+    private List<Notification> _notificationQueue = new List<Notification>();
+    private bool _isInitialized = false;
     
-    [Header("UI Panels")]
-    [SerializeField] private GameObject taskPanel;
-    [SerializeField] private GameObject focusPanel;
-    [SerializeField] private GameObject settingsPanel;
-    [SerializeField] private GameObject helpPanel;
+    private class Notification
+    {
+        public string title;
+        public string message;
+        public NotificationPriority priority;
+        public float duration;
+    }
     
-    [Header("Positioning")]
-    [SerializeField] private Transform headTransform;
-    [SerializeField] private float defaultDistance = 0.5f;
-    [SerializeField] private float defaultHeight = -0.1f;
-    [SerializeField] private float panelSpacing = 0.3f;
-    [SerializeField] private float followSpeed = 5f;
-    [SerializeField] private float rotationSmoothness = 3f;
+    private enum NotificationPriority
+    {
+        Low,
+        Medium,
+        High,
+        Urgent
+    }
     
-    [Header("Interaction")]
-    [SerializeField] private XRRayInteractor leftRayInteractor;
-    [SerializeField] private XRRayInteractor rightRayInteractor;
-    [SerializeField] private float interactionDistance = 0.7f;
-    
-    [Header("Focus Mode")]
-    [SerializeField] private bool focusModeEnabled = false;
-    [SerializeField] private float focusModeDimming = 0.7f;
-    [SerializeField] private Color focusModeColor = new Color(0.1f, 0.1f, 0.3f, 0.5f);
-    [SerializeField] private float focusModeTransitionDuration = 1.0f;
-    
-    [Header("Effects")]
-    [SerializeField] private ParticleSystem transitionParticles;
-    [SerializeField] private AudioSource audioSource;
-    [SerializeField] private AudioClip panelOpenSound;
-    [SerializeField] private AudioClip panelCloseSound;
-    [SerializeField] private AudioClip focusModeEnableSound;
-    [SerializeField] private AudioClip focusModeDisableSound;
-    
-    private HUDTheme currentTheme;
-    private float themeTransitionProgress = 0f;
-    private bool isThemeTransitioning = false;
-    private List<TaskItem> activeTasks = new List<TaskItem>();
-    private Dictionary<string, Achievement> unlockedAchievements = new Dictionary<string, Achievement>();
-    private float currentXP = 0f;
-    private int currentLevel = 1;
-    private int productivityStreak = 0;
-    private float lastStreakUpdate = 0f;
-    private Queue<Notification> notificationQueue = new Queue<Notification>();
-    private AudioSource ambientAudioSource;
-    private int currentTextSizeIndex = 1;
-    
-    private Vector3 _targetPosition;
-    private Quaternion _targetRotation;
-    private bool _isFollowingHead = true;
-    private GameObject _currentActivePanel;
-    private Coroutine _repositionCoroutine;
+    private void Awake()
+    {
+        // Find required dependencies
+        _taskManager = FindObjectOfType<TaskManager>();
+        _themeManager = FindObjectOfType<ThemeManager>();
+        _pomodoroManager = FindObjectOfType<PomodoroManager>();
+        _achievementSystem = FindObjectOfType<AchievementSystem>();
+        
+        if (_taskManager == null)
+        {
+            Debug.LogWarning("TaskManager not found. Creating one.");
+            GameObject taskManagerObj = new GameObject("TaskManager");
+            taskManagerObj.transform.SetParent(transform);
+            _taskManager = taskManagerObj.AddComponent<TaskManager>();
+        }
+    }
     
     private void Start()
     {
-        // Find components if not assigned
-        if (xrSessionManager == null)
+        InitializeHUD();
+    }
+    
+    private void InitializeHUD()
+    {
+        // Load user preferences
+        LoadUserPreferences();
+        
+        // Initialize theme
+        if (_themeManager != null && defaultTheme != null)
         {
-            xrSessionManager = FindObjectOfType<XRSessionManager>();
+            _themeManager.ChangeTheme(defaultTheme);
         }
         
-        if (passthroughManager == null)
+        // Set up task management
+        if (addTaskButton != null && taskInputField != null)
         {
-            passthroughManager = FindObjectOfType<PassthroughManager>();
+            addTaskButton.onClick.AddListener(AddTask);
         }
         
-        if (taskManager == null)
+        // Set up pomodoro timer
+        if (startPomodoroButton != null && _pomodoroManager != null)
         {
-            taskManager = FindObjectOfType<TaskManager>();
-        }
-        
-        if (headTransform == null)
-        {
-            var xrRig = FindObjectOfType<UnityEngine.XR.Interaction.Toolkit.XRRig>();
-            if (xrRig != null)
+            startPomodoroButton.onClick.AddListener(_pomodoroManager.StartSession);
+            
+            if (pausePomodoroButton != null)
             {
-                headTransform = xrRig.cameraGameObject.transform;
+                pausePomodoroButton.onClick.AddListener(_pomodoroManager.PauseSession);
             }
         }
         
-        // Initialize UI
-        InitializeUI();
-        
-        // Start following head
-        StartCoroutine(FollowHead());
-        
-        InitializeSystems();
-        LoadUserPreferences();
-        StartAmbientAudio();
-    }
-    
-    private void InitializeSystems()
-    {
-        // Initialize theme system
-        if (availableThemes.Count > 0)
+        // Set up breathing guide
+        if (breathingGuideButton != null)
         {
-            currentTheme = availableThemes[0];
-            ApplyTheme(currentTheme);
+            breathingGuideButton.onClick.AddListener(StartBreathingExercise);
         }
         
-        // Initialize task system
-        InitializeTaskSystem();
+        // Subscribe to events
+        SubscribeToEvents();
         
-        // Initialize achievement system
-        InitializeAchievements();
-        
-        // Initialize notification system
-        InitializeNotifications();
-        
-        // Initialize social features
-        InitializeSocialFeatures();
+        _isInitialized = true;
     }
     
     private void LoadUserPreferences()
     {
-        // Load saved preferences
-        currentTextSizeIndex = PlayerPrefs.GetInt("TextSize", 1);
-        highContrastMode = PlayerPrefs.GetInt("HighContrast", 0) == 1;
-        reducedMotion = PlayerPrefs.GetInt("ReducedMotion", 0) == 1;
+        // Text size preference
+        float textSize = PlayerPrefs.GetFloat("TextSize", defaultTextSize);
+        SetGlobalTextSize(textSize);
         
-        // Apply preferences
-        UpdateTextSize();
-        UpdateContrastMode();
-        UpdateMotionSettings();
+        // High contrast mode preference
+        bool highContrastMode = PlayerPrefs.GetInt("HighContrastMode", highContrastModeDefault ? 1 : 0) == 1;
+        SetHighContrastMode(highContrastMode);
+        
+        // Reduced motion preference
+        bool reduceMotion = PlayerPrefs.GetInt("ReduceMotion", reduceMotionDefault ? 1 : 0) == 1;
+        SetReducedMotion(reduceMotion);
     }
     
-    private void StartAmbientAudio()
+    private void SetGlobalTextSize(float size)
     {
-        ambientAudioSource = gameObject.AddComponent<AudioSource>();
-        ambientAudioSource.loop = true;
-        ambientAudioSource.volume = 0.3f;
-        
-        if (ambientSounds.Length > 0)
+        // Find all TextMeshPro components and set their size
+        TMP_Text[] texts = FindObjectsOfType<TMP_Text>();
+        foreach (var text in texts)
         {
-            ambientAudioSource.clip = ambientSounds[0];
-            ambientAudioSource.Play();
+            text.fontSize = size;
         }
     }
     
-    private void Update()
+    private void SetHighContrastMode(bool enabled)
     {
-        UpdateThemeTransition();
-        UpdateStreak();
-        ProcessNotifications();
-        UpdateSocialFeed();
+        // Apply high contrast mode if theme manager is available
+        if (_themeManager != null)
+        {
+            _themeManager.SetHighContrastMode(enabled);
+        }
     }
     
-    private void UpdateThemeTransition()
+    private void SetReducedMotion(bool enabled)
     {
-        if (isThemeTransitioning)
+        // Store the setting for other components to access
+        PlayerPrefs.SetInt("ReduceMotion", enabled ? 1 : 0);
+        PlayerPrefs.Save();
+    }
+    
+    private void SubscribeToEvents()
+    {
+        if (_taskManager != null)
         {
-            themeTransitionProgress += Time.deltaTime / themeTransitionDuration;
-            float t = themeTransitionCurve.Evaluate(themeTransitionProgress);
+            _taskManager.OnTaskCompleted += OnTaskCompleted;
+        }
+        
+        if (_pomodoroManager != null)
+        {
+            _pomodoroManager.OnSessionCompleted += OnPomodoroSessionCompleted;
+        }
+    }
+    
+    private void AddTask()
+    {
+        if (_taskManager != null && taskInputField != null && !string.IsNullOrEmpty(taskInputField.text))
+        {
+            _taskManager.CreateTask(taskInputField.text);
+            taskInputField.text = "";
             
-            // Interpolate theme properties
-            if (themeTransitionProgress >= 1f)
-            {
-                isThemeTransitioning = false;
-                themeTransitionProgress = 0f;
-            }
+            // Give focus back to input field
+            taskInputField.ActivateInputField();
         }
     }
     
-    private void UpdateStreak()
+    private void OnTaskCompleted(TaskManager.Task task)
     {
-        if (Time.time - lastStreakUpdate >= streakUpdateInterval)
+        // Award XP for completing a task
+        if (_achievementSystem != null)
         {
-            CheckAndUpdateStreak();
-            lastStreakUpdate = Time.time;
+            int xpAmount = 0;
+            
+            // XP based on priority
+            switch (task.priority)
+            {
+                case TaskManager.TaskPriority.Low:
+                    xpAmount = 5;
+                    break;
+                case TaskManager.TaskPriority.Medium:
+                    xpAmount = 10;
+                    break;
+                case TaskManager.TaskPriority.High:
+                    xpAmount = 15;
+                    break;
+                case TaskManager.TaskPriority.Urgent:
+                    xpAmount = 20;
+                    break;
+            }
+            
+            AddExperience(xpAmount);
         }
     }
     
-    private void CheckAndUpdateStreak()
+    private void OnPomodoroSessionCompleted()
     {
-        // Check if user has completed tasks
-        bool hasCompletedTasks = false;
-        foreach (var task in activeTasks)
-        {
-            if (task.IsCompleted)
-            {
-                hasCompletedTasks = true;
-                break;
-            }
-        }
+        // Award XP for completing a pomodoro session
+        AddExperience(15);
         
-        if (hasCompletedTasks)
+        // Add a notification
+        AddNotification("Pomodoro completed!", "Take a short break before continuing.", NotificationPriority.Medium, 5f);
+    }
+    
+    private void StartBreathingExercise()
+    {
+        // Find and activate the breathing guide
+        BreathingGuide breathingGuide = FindObjectOfType<BreathingGuide>();
+        if (breathingGuide != null)
         {
-            productivityStreak++;
-            ShowAchievement("Streak" + productivityStreak);
+            breathingGuide.StartBreathingExercise();
         }
         else
         {
-            productivityStreak = 0;
+            Debug.LogWarning("BreathingGuide component not found");
         }
     }
     
-    private void ProcessNotifications()
+    private void AddExperience(int amount)
     {
-        if (notificationQueue.Count > 0)
+        // Update XP display
+        if (xpText != null)
         {
-            var notification = notificationQueue.Peek();
-            if (Time.time >= notification.displayTime + notificationDuration)
+            int currentXP = PlayerPrefs.GetInt("UserXP", 0);
+            int newXP = currentXP + amount;
+            
+            PlayerPrefs.SetInt("UserXP", newXP);
+            PlayerPrefs.Save();
+            
+            xpText.text = $"XP: {newXP}";
+            
+            // Update progress bar
+            if (progressBar != null)
             {
-                notificationQueue.Dequeue();
-                RemoveNotification(notification);
+                int xpForNextLevel = 100; // Simple example
+                float progress = Mathf.Clamp01((float)newXP % xpForNextLevel / xpForNextLevel);
+                StartCoroutine(AnimateProgressBar(progressBar.value, progress));
             }
         }
     }
     
-    private void UpdateSocialFeed()
+    private IEnumerator AnimateProgressBar(float from, float to)
     {
-        // Update friend activity and community challenges
-        if (socialPanel.activeSelf)
-        {
-            UpdateFriendActivity();
-            UpdateCommunityChallenges();
-        }
-    }
-    
-    // Theme System Methods
-    public void ChangeTheme(HUDTheme newTheme)
-    {
-        if (currentTheme != newTheme)
-        {
-            currentTheme = newTheme;
-            isThemeTransitioning = true;
-            themeTransitionProgress = 0f;
-            ApplyTheme(newTheme);
-        }
-    }
-    
-    private void ApplyTheme(HUDTheme theme)
-    {
-        // Apply theme colors and effects
-        if (themeParticles != null)
-        {
-            var main = themeParticles.main;
-            main.startColor = theme.primaryColor;
-        }
-        
-        // Update UI elements with theme colors
-        UpdateUITheme(theme);
-    }
-    
-    private void UpdateUITheme(HUDTheme theme)
-    {
-        // Update all UI elements with new theme colors
-        // This would be implemented based on your UI structure
-    }
-    
-    // Task System Methods
-    private void InitializeTaskSystem()
-    {
-        // Initialize task container and drag-drop functionality
-    }
-    
-    public void AddTask(string title, TaskPriority priority = TaskPriority.Normal)
-    {
-        GameObject taskObj = Instantiate(taskItemPrefab, taskContainer);
-        TaskItem task = taskObj.GetComponent<TaskItem>();
-        task.Initialize(title, priority);
-        activeTasks.Add(task);
-        
-        // Animate task appearance
-        AnimateTaskAppearance(task);
-    }
-    
-    private void AnimateTaskAppearance(TaskItem task)
-    {
-        // Animate task appearance with spring physics
-        StartCoroutine(AnimateTaskCoroutine(task));
-    }
-    
-    private System.Collections.IEnumerator AnimateTaskCoroutine(TaskItem task)
-    {
+        float duration = 1.0f;
         float elapsed = 0f;
-        Vector3 startScale = Vector3.zero;
-        Vector3 targetScale = Vector3.one;
-        
-        while (elapsed < taskAnimationDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / taskAnimationDuration;
-            task.transform.localScale = Vector3.Lerp(startScale, targetScale, t);
-            yield return null;
-        }
-        
-        task.transform.localScale = targetScale;
-    }
-    
-    // Achievement System Methods
-    private void InitializeAchievements()
-    {
-        foreach (var achievement in achievements)
-        {
-            unlockedAchievements[achievement.id] = null;
-        }
-    }
-    
-    public void ShowAchievement(string achievementId)
-    {
-        if (achievements.Exists(a => a.id == achievementId))
-        {
-            var achievement = achievements.Find(a => a.id == achievementId);
-            if (unlockedAchievements[achievementId] == null)
-            {
-                unlockedAchievements[achievementId] = achievement;
-                DisplayAchievement(achievement);
-                AddXP(achievement.xpReward);
-            }
-        }
-    }
-    
-    private void DisplayAchievement(Achievement achievement)
-    {
-        // Show achievement popup with animation
-        if (achievementPanel != null)
-        {
-            achievementPanel.SetActive(true);
-            // Update achievement UI
-        }
-    }
-    
-    // XP and Leveling System
-    private void AddXP(float amount)
-    {
-        currentXP += amount;
-        CheckLevelUp();
-    }
-    
-    private void CheckLevelUp()
-    {
-        float xpNeeded = currentLevel * 1000f;
-        if (currentXP >= xpNeeded)
-        {
-            LevelUp();
-        }
-    }
-    
-    private void LevelUp()
-    {
-        currentLevel++;
-        currentXP -= currentLevel * 1000f;
-        ShowAchievement("Level" + currentLevel);
-    }
-    
-    // Notification System Methods
-    private void InitializeNotifications()
-    {
-        // Initialize notification panel and queue
-    }
-    
-    public void ShowNotification(string message, NotificationPriority priority = NotificationPriority.Normal)
-    {
-        var notification = new Notification
-        {
-            message = message,
-            priority = priority,
-            displayTime = Time.time
-        };
-        
-        notificationQueue.Enqueue(notification);
-        DisplayNotification(notification);
-    }
-    
-    private void DisplayNotification(Notification notification)
-    {
-        GameObject notificationObj = Instantiate(notificationPrefab, notificationPanel.transform);
-        // Set up notification UI
-    }
-    
-    private void RemoveNotification(Notification notification)
-    {
-        // Remove notification from UI
-    }
-    
-    // Accessibility Methods
-    public void UpdateTextSize()
-    {
-        float newSize = textSizeOptions[currentTextSizeIndex];
-        // Update all text components with new size
-    }
-    
-    public void ToggleHighContrastMode()
-    {
-        highContrastMode = !highContrastMode;
-        PlayerPrefs.SetInt("HighContrast", highContrastMode ? 1 : 0);
-        UpdateContrastMode();
-    }
-    
-    private void UpdateContrastMode()
-    {
-        // Update UI contrast based on mode
-    }
-    
-    public void ToggleReducedMotion()
-    {
-        reducedMotion = !reducedMotion;
-        PlayerPrefs.SetInt("ReducedMotion", reducedMotion ? 1 : 0);
-        UpdateMotionSettings();
-    }
-    
-    private void UpdateMotionSettings()
-    {
-        // Update animation speeds and effects based on motion settings
-    }
-    
-    // Social Features Methods
-    private void InitializeSocialFeatures()
-    {
-        // Initialize social panel and features
-    }
-    
-    private void UpdateFriendActivity()
-    {
-        // Update friend activity feed
-    }
-    
-    private void UpdateCommunityChallenges()
-    {
-        // Update community challenges display
-    }
-    
-    private void InitializeUI()
-    {
-        // Hide all panels initially
-        SetPanelActive(taskPanel, false);
-        SetPanelActive(focusPanel, false);
-        SetPanelActive(settingsPanel, false);
-        SetPanelActive(helpPanel, false);
-        
-        // Show task panel by default
-        ShowPanel(taskPanel);
-    }
-    
-    /// <summary>
-    /// Shows a panel and hides all others
-    /// </summary>
-    /// <param name="panel">Panel to show</param>
-    public void ShowPanel(GameObject panel)
-    {
-        if (panel == null)
-            return;
-        
-        // Hide current panel
-        if (_currentActivePanel != null && _currentActivePanel != panel)
-        {
-            SetPanelActive(_currentActivePanel, false);
-        }
-        
-        // Show new panel
-        SetPanelActive(panel, true);
-        _currentActivePanel = panel;
-        
-        // Reposition panel in front of user
-        RepositionPanel(panel);
-        
-        // Play sound
-        if (audioSource != null && panelOpenSound != null)
-        {
-            audioSource.PlayOneShot(panelOpenSound);
-        }
-    }
-    
-    /// <summary>
-    /// Hides a panel
-    /// </summary>
-    /// <param name="panel">Panel to hide</param>
-    public void HidePanel(GameObject panel)
-    {
-        if (panel == null)
-            return;
-        
-        SetPanelActive(panel, false);
-        
-        if (_currentActivePanel == panel)
-        {
-            _currentActivePanel = null;
-        }
-        
-        // Play sound
-        if (audioSource != null && panelCloseSound != null)
-        {
-            audioSource.PlayOneShot(panelCloseSound);
-        }
-    }
-    
-    /// <summary>
-    /// Sets a panel's active state with animation
-    /// </summary>
-    /// <param name="panel">Panel to set</param>
-    /// <param name="active">Whether to activate or deactivate</param>
-    private void SetPanelActive(GameObject panel, bool active)
-    {
-        if (panel == null)
-            return;
-        
-        if (active)
-        {
-            panel.SetActive(true);
-            
-            // Scale animation
-            panel.transform.localScale = Vector3.zero;
-            LeanTween.scale(panel, Vector3.one, 0.3f)
-                .setEase(LeanTweenType.easeOutBack);
-        }
-        else
-        {
-            // Scale animation
-            LeanTween.scale(panel, Vector3.zero, 0.2f)
-                .setEase(LeanTweenType.easeInBack)
-                .setOnComplete(() => panel.SetActive(false));
-        }
-    }
-    
-    /// <summary>
-    /// Repositions a panel in front of the user
-    /// </summary>
-    /// <param name="panel">Panel to reposition</param>
-    public void RepositionPanel(GameObject panel)
-    {
-        if (panel == null || headTransform == null)
-            return;
-        
-        if (_repositionCoroutine != null)
-        {
-            StopCoroutine(_repositionCoroutine);
-        }
-        
-        _repositionCoroutine = StartCoroutine(RepositionPanelCoroutine(panel));
-    }
-    
-    private IEnumerator RepositionPanelCoroutine(GameObject panel)
-    {
-        Vector3 headForward = headTransform.forward;
-        headForward.y = 0;
-        headForward.Normalize();
-        
-        Vector3 targetPosition = headTransform.position + headForward * defaultDistance;
-        targetPosition.y = headTransform.position.y + defaultHeight;
-        
-        Quaternion targetRotation = Quaternion.LookRotation(targetPosition - headTransform.position);
-        
-        float duration = 0.5f;
-        float elapsed = 0;
-        
-        Vector3 startPosition = panel.transform.position;
-        Quaternion startRotation = panel.transform.rotation;
         
         while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
             float t = Mathf.Clamp01(elapsed / duration);
             
-            panel.transform.position = Vector3.Lerp(startPosition, targetPosition, t);
-            panel.transform.rotation = Quaternion.Slerp(startRotation, targetRotation, t);
-            
-            yield return null;
-        }
-        
-        panel.transform.position = targetPosition;
-        panel.transform.rotation = targetRotation;
-        
-        _repositionCoroutine = null;
-    }
-    
-    /// <summary>
-    /// Follows the user's head position
-    /// </summary>
-    private IEnumerator FollowHead()
-    {
-        while (_isFollowingHead)
-        {
-            if (headTransform != null && _currentActivePanel != null)
+            if (progressBar != null)
             {
-                // Check if panel is too far from user
-                float distance = Vector3.Distance(_currentActivePanel.transform.position, headTransform.position);
-                if (distance > interactionDistance)
-                {
-                    RepositionPanel(_currentActivePanel);
-                }
-                
-                // Smoothly rotate panel to face user
-                Vector3 directionToHead = headTransform.position - _currentActivePanel.transform.position;
-                directionToHead.y = 0;
-                
-                if (directionToHead.magnitude > 0.01f)
-                {
-                    Quaternion targetRotation = Quaternion.LookRotation(directionToHead);
-                    _currentActivePanel.transform.rotation = Quaternion.Slerp(
-                        _currentActivePanel.transform.rotation,
-                        targetRotation,
-                        Time.deltaTime * rotationSmoothness
-                    );
-                }
+                progressBar.value = Mathf.Lerp(from, to, t);
             }
             
             yield return null;
         }
-    }
-    
-    /// <summary>
-    /// Toggles focus mode
-    /// </summary>
-    public void ToggleFocusMode()
-    {
-        focusModeEnabled = !focusModeEnabled;
         
-        if (focusModeEnabled)
+        if (progressBar != null)
         {
-            EnableFocusMode();
-        }
-        else
-        {
-            DisableFocusMode();
+            progressBar.value = to;
         }
     }
     
-    /// <summary>
-    /// Enables focus mode
-    /// </summary>
-    public void EnableFocusMode()
+    public void AddNotification(string title, string message, NotificationPriority priority, float duration)
     {
-        focusModeEnabled = true;
-        
-        // Update passthrough settings
-        if (passthroughManager != null)
+        Notification notification = new Notification
         {
-            passthroughManager.UpdatePassthroughSettings(-focusModeDimming, focusModeDimming);
-        }
-        
-        // Play effects
-        if (transitionParticles != null)
-        {
-            var main = transitionParticles.main;
-            main.startColor = focusModeColor;
-            transitionParticles.Play();
-        }
-        
-        // Play sound
-        if (audioSource != null && focusModeEnableSound != null)
-        {
-            audioSource.PlayOneShot(focusModeEnableSound);
-        }
-        
-        // Show focus panel
-        ShowPanel(focusPanel);
-    }
-    
-    /// <summary>
-    /// Disables focus mode
-    /// </summary>
-    public void DisableFocusMode()
-    {
-        focusModeEnabled = false;
-        
-        // Update passthrough settings
-        if (passthroughManager != null)
-        {
-            passthroughManager.UpdatePassthroughSettings(0, 0);
-        }
-        
-        // Play effects
-        if (transitionParticles != null)
-        {
-            var main = transitionParticles.main;
-            main.startColor = Color.white;
-            transitionParticles.Play();
-        }
-        
-        // Play sound
-        if (audioSource != null && focusModeDisableSound != null)
-        {
-            audioSource.PlayOneShot(focusModeDisableSound);
-        }
-        
-        // Show task panel
-        ShowPanel(taskPanel);
-    }
-    
-    /// <summary>
-    /// Shows the task panel
-    /// </summary>
-    public void ShowTaskPanel()
-    {
-        ShowPanel(taskPanel);
-    }
-    
-    /// <summary>
-    /// Shows the focus panel
-    /// </summary>
-    public void ShowFocusPanel()
-    {
-        ShowPanel(focusPanel);
-    }
-    
-    /// <summary>
-    /// Shows the settings panel
-    /// </summary>
-    public void ShowSettingsPanel()
-    {
-        ShowPanel(settingsPanel);
-    }
-    
-    /// <summary>
-    /// Shows the help panel
-    /// </summary>
-    public void ShowHelpPanel()
-    {
-        ShowPanel(helpPanel);
-    }
-    
-    /// <summary>
-    /// Adds a sample task for testing
-    /// </summary>
-    public void AddSampleTask()
-    {
-        if (taskManager == null)
-            return;
-        
-        string[] sampleTasks = new string[]
-        {
-            "Complete project documentation",
-            "Review code changes",
-            "Test HUD functionality",
-            "Update README",
-            "Fix UI bugs",
-            "Implement new feature",
-            "Optimize performance",
-            "Write unit tests"
+            title = title,
+            message = message,
+            priority = priority,
+            duration = duration
         };
         
-        TaskManager.TaskPriority[] priorities = new TaskManager.TaskPriority[]
+        _notificationQueue.Add(notification);
+        
+        if (_notificationQueue.Count == 1)
         {
-            TaskManager.TaskPriority.Low,
-            TaskManager.TaskPriority.Medium,
-            TaskManager.TaskPriority.High,
-            TaskManager.TaskPriority.Urgent
-        };
-        
-        int taskIndex = Random.Range(0, sampleTasks.Length);
-        int priorityIndex = Random.Range(0, priorities.Length);
-        
-        taskManager.CreateTask(sampleTasks[taskIndex], "Sample task description", priorities[priorityIndex]);
+            StartCoroutine(ProcessNotificationQueue());
+        }
+    }
+    
+    private IEnumerator ProcessNotificationQueue()
+    {
+        while (_notificationQueue.Count > 0)
+        {
+            Notification notification = _notificationQueue[0];
+            
+            // Display notification (implementation would depend on your UI)
+            Debug.Log($"[Notification] {notification.title}: {notification.message}");
+            
+            // Wait for the specified duration
+            yield return new WaitForSeconds(notification.duration);
+            
+            // Remove from queue
+            _notificationQueue.RemoveAt(0);
+        }
     }
 }
-
-// Supporting Classes
-[System.Serializable]
-public class HUDTheme
-{
-    public string name;
-    public Color primaryColor;
-    public Color secondaryColor;
-    public Color accentColor;
-    public Color backgroundColor;
-    public Color textColor;
-    public ParticleSystem.MinMaxGradient particleColor;
-}
-
-[System.Serializable]
-public class Achievement
-{
-    public string id;
-    public string title;
-    public string description;
-    public Sprite icon;
-    public float xpReward;
-}
-
-public enum TaskPriority
-{
-    Low,
-    Normal,
-    High,
-    Urgent
-}
-
-public enum NotificationPriority
-{
-    Low,
-    Normal,
-    High,
-    Critical
-}
-
-public struct Notification
-{
-    public string message;
-    public NotificationPriority priority;
-    public float displayTime;
-} 

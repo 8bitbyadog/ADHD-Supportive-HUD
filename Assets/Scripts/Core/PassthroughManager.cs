@@ -217,4 +217,4 @@ public class PassthroughManager : MonoBehaviour
     {
         Debug.LogError($"[PassthroughManager] {message}");
     }
-} 
+}
