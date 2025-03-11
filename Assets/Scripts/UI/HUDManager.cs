@@ -2,7 +2,13 @@ using UnityEngine;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine.UI;
+using System.Collections;
+using UnityEngine.XR.Interaction.Toolkit;
 
+/// <summary>
+/// Main manager for the HUD system
+/// Coordinates all UI components and manages the overall HUD state
+/// </summary>
 public class HUDManager : MonoBehaviour
 {
     [Header("Theme System")]
@@ -50,6 +56,44 @@ public class HUDManager : MonoBehaviour
     [SerializeField] private GameObject friendActivityFeed;
     [SerializeField] private GameObject communityChallenges;
 
+    [Header("Core Components")]
+    [SerializeField] private XRSessionManager xrSessionManager;
+    [SerializeField] private PassthroughManager passthroughManager;
+    [SerializeField] private TaskManager taskManager;
+    
+    [Header("UI Panels")]
+    [SerializeField] private GameObject taskPanel;
+    [SerializeField] private GameObject focusPanel;
+    [SerializeField] private GameObject settingsPanel;
+    [SerializeField] private GameObject helpPanel;
+    
+    [Header("Positioning")]
+    [SerializeField] private Transform headTransform;
+    [SerializeField] private float defaultDistance = 0.5f;
+    [SerializeField] private float defaultHeight = -0.1f;
+    [SerializeField] private float panelSpacing = 0.3f;
+    [SerializeField] private float followSpeed = 5f;
+    [SerializeField] private float rotationSmoothness = 3f;
+    
+    [Header("Interaction")]
+    [SerializeField] private XRRayInteractor leftRayInteractor;
+    [SerializeField] private XRRayInteractor rightRayInteractor;
+    [SerializeField] private float interactionDistance = 0.7f;
+    
+    [Header("Focus Mode")]
+    [SerializeField] private bool focusModeEnabled = false;
+    [SerializeField] private float focusModeDimming = 0.7f;
+    [SerializeField] private Color focusModeColor = new Color(0.1f, 0.1f, 0.3f, 0.5f);
+    [SerializeField] private float focusModeTransitionDuration = 1.0f;
+    
+    [Header("Effects")]
+    [SerializeField] private ParticleSystem transitionParticles;
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip panelOpenSound;
+    [SerializeField] private AudioClip panelCloseSound;
+    [SerializeField] private AudioClip focusModeEnableSound;
+    [SerializeField] private AudioClip focusModeDisableSound;
+    
     private HUDTheme currentTheme;
     private float themeTransitionProgress = 0f;
     private bool isThemeTransitioning = false;
@@ -63,8 +107,45 @@ public class HUDManager : MonoBehaviour
     private AudioSource ambientAudioSource;
     private int currentTextSizeIndex = 1;
     
+    private Vector3 _targetPosition;
+    private Quaternion _targetRotation;
+    private bool _isFollowingHead = true;
+    private GameObject _currentActivePanel;
+    private Coroutine _repositionCoroutine;
+    
     private void Start()
     {
+        // Find components if not assigned
+        if (xrSessionManager == null)
+        {
+            xrSessionManager = FindObjectOfType<XRSessionManager>();
+        }
+        
+        if (passthroughManager == null)
+        {
+            passthroughManager = FindObjectOfType<PassthroughManager>();
+        }
+        
+        if (taskManager == null)
+        {
+            taskManager = FindObjectOfType<TaskManager>();
+        }
+        
+        if (headTransform == null)
+        {
+            var xrRig = FindObjectOfType<UnityEngine.XR.Interaction.Toolkit.XRRig>();
+            if (xrRig != null)
+            {
+                headTransform = xrRig.cameraGameObject.transform;
+            }
+        }
+        
+        // Initialize UI
+        InitializeUI();
+        
+        // Start following head
+        StartCoroutine(FollowHead());
+        
         InitializeSystems();
         LoadUserPreferences();
         StartAmbientAudio();
@@ -400,6 +481,329 @@ public class HUDManager : MonoBehaviour
     private void UpdateCommunityChallenges()
     {
         // Update community challenges display
+    }
+    
+    private void InitializeUI()
+    {
+        // Hide all panels initially
+        SetPanelActive(taskPanel, false);
+        SetPanelActive(focusPanel, false);
+        SetPanelActive(settingsPanel, false);
+        SetPanelActive(helpPanel, false);
+        
+        // Show task panel by default
+        ShowPanel(taskPanel);
+    }
+    
+    /// <summary>
+    /// Shows a panel and hides all others
+    /// </summary>
+    /// <param name="panel">Panel to show</param>
+    public void ShowPanel(GameObject panel)
+    {
+        if (panel == null)
+            return;
+        
+        // Hide current panel
+        if (_currentActivePanel != null && _currentActivePanel != panel)
+        {
+            SetPanelActive(_currentActivePanel, false);
+        }
+        
+        // Show new panel
+        SetPanelActive(panel, true);
+        _currentActivePanel = panel;
+        
+        // Reposition panel in front of user
+        RepositionPanel(panel);
+        
+        // Play sound
+        if (audioSource != null && panelOpenSound != null)
+        {
+            audioSource.PlayOneShot(panelOpenSound);
+        }
+    }
+    
+    /// <summary>
+    /// Hides a panel
+    /// </summary>
+    /// <param name="panel">Panel to hide</param>
+    public void HidePanel(GameObject panel)
+    {
+        if (panel == null)
+            return;
+        
+        SetPanelActive(panel, false);
+        
+        if (_currentActivePanel == panel)
+        {
+            _currentActivePanel = null;
+        }
+        
+        // Play sound
+        if (audioSource != null && panelCloseSound != null)
+        {
+            audioSource.PlayOneShot(panelCloseSound);
+        }
+    }
+    
+    /// <summary>
+    /// Sets a panel's active state with animation
+    /// </summary>
+    /// <param name="panel">Panel to set</param>
+    /// <param name="active">Whether to activate or deactivate</param>
+    private void SetPanelActive(GameObject panel, bool active)
+    {
+        if (panel == null)
+            return;
+        
+        if (active)
+        {
+            panel.SetActive(true);
+            
+            // Scale animation
+            panel.transform.localScale = Vector3.zero;
+            LeanTween.scale(panel, Vector3.one, 0.3f)
+                .setEase(LeanTweenType.easeOutBack);
+        }
+        else
+        {
+            // Scale animation
+            LeanTween.scale(panel, Vector3.zero, 0.2f)
+                .setEase(LeanTweenType.easeInBack)
+                .setOnComplete(() => panel.SetActive(false));
+        }
+    }
+    
+    /// <summary>
+    /// Repositions a panel in front of the user
+    /// </summary>
+    /// <param name="panel">Panel to reposition</param>
+    public void RepositionPanel(GameObject panel)
+    {
+        if (panel == null || headTransform == null)
+            return;
+        
+        if (_repositionCoroutine != null)
+        {
+            StopCoroutine(_repositionCoroutine);
+        }
+        
+        _repositionCoroutine = StartCoroutine(RepositionPanelCoroutine(panel));
+    }
+    
+    private IEnumerator RepositionPanelCoroutine(GameObject panel)
+    {
+        Vector3 headForward = headTransform.forward;
+        headForward.y = 0;
+        headForward.Normalize();
+        
+        Vector3 targetPosition = headTransform.position + headForward * defaultDistance;
+        targetPosition.y = headTransform.position.y + defaultHeight;
+        
+        Quaternion targetRotation = Quaternion.LookRotation(targetPosition - headTransform.position);
+        
+        float duration = 0.5f;
+        float elapsed = 0;
+        
+        Vector3 startPosition = panel.transform.position;
+        Quaternion startRotation = panel.transform.rotation;
+        
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            
+            panel.transform.position = Vector3.Lerp(startPosition, targetPosition, t);
+            panel.transform.rotation = Quaternion.Slerp(startRotation, targetRotation, t);
+            
+            yield return null;
+        }
+        
+        panel.transform.position = targetPosition;
+        panel.transform.rotation = targetRotation;
+        
+        _repositionCoroutine = null;
+    }
+    
+    /// <summary>
+    /// Follows the user's head position
+    /// </summary>
+    private IEnumerator FollowHead()
+    {
+        while (_isFollowingHead)
+        {
+            if (headTransform != null && _currentActivePanel != null)
+            {
+                // Check if panel is too far from user
+                float distance = Vector3.Distance(_currentActivePanel.transform.position, headTransform.position);
+                if (distance > interactionDistance)
+                {
+                    RepositionPanel(_currentActivePanel);
+                }
+                
+                // Smoothly rotate panel to face user
+                Vector3 directionToHead = headTransform.position - _currentActivePanel.transform.position;
+                directionToHead.y = 0;
+                
+                if (directionToHead.magnitude > 0.01f)
+                {
+                    Quaternion targetRotation = Quaternion.LookRotation(directionToHead);
+                    _currentActivePanel.transform.rotation = Quaternion.Slerp(
+                        _currentActivePanel.transform.rotation,
+                        targetRotation,
+                        Time.deltaTime * rotationSmoothness
+                    );
+                }
+            }
+            
+            yield return null;
+        }
+    }
+    
+    /// <summary>
+    /// Toggles focus mode
+    /// </summary>
+    public void ToggleFocusMode()
+    {
+        focusModeEnabled = !focusModeEnabled;
+        
+        if (focusModeEnabled)
+        {
+            EnableFocusMode();
+        }
+        else
+        {
+            DisableFocusMode();
+        }
+    }
+    
+    /// <summary>
+    /// Enables focus mode
+    /// </summary>
+    public void EnableFocusMode()
+    {
+        focusModeEnabled = true;
+        
+        // Update passthrough settings
+        if (passthroughManager != null)
+        {
+            passthroughManager.UpdatePassthroughSettings(-focusModeDimming, focusModeDimming);
+        }
+        
+        // Play effects
+        if (transitionParticles != null)
+        {
+            var main = transitionParticles.main;
+            main.startColor = focusModeColor;
+            transitionParticles.Play();
+        }
+        
+        // Play sound
+        if (audioSource != null && focusModeEnableSound != null)
+        {
+            audioSource.PlayOneShot(focusModeEnableSound);
+        }
+        
+        // Show focus panel
+        ShowPanel(focusPanel);
+    }
+    
+    /// <summary>
+    /// Disables focus mode
+    /// </summary>
+    public void DisableFocusMode()
+    {
+        focusModeEnabled = false;
+        
+        // Update passthrough settings
+        if (passthroughManager != null)
+        {
+            passthroughManager.UpdatePassthroughSettings(0, 0);
+        }
+        
+        // Play effects
+        if (transitionParticles != null)
+        {
+            var main = transitionParticles.main;
+            main.startColor = Color.white;
+            transitionParticles.Play();
+        }
+        
+        // Play sound
+        if (audioSource != null && focusModeDisableSound != null)
+        {
+            audioSource.PlayOneShot(focusModeDisableSound);
+        }
+        
+        // Show task panel
+        ShowPanel(taskPanel);
+    }
+    
+    /// <summary>
+    /// Shows the task panel
+    /// </summary>
+    public void ShowTaskPanel()
+    {
+        ShowPanel(taskPanel);
+    }
+    
+    /// <summary>
+    /// Shows the focus panel
+    /// </summary>
+    public void ShowFocusPanel()
+    {
+        ShowPanel(focusPanel);
+    }
+    
+    /// <summary>
+    /// Shows the settings panel
+    /// </summary>
+    public void ShowSettingsPanel()
+    {
+        ShowPanel(settingsPanel);
+    }
+    
+    /// <summary>
+    /// Shows the help panel
+    /// </summary>
+    public void ShowHelpPanel()
+    {
+        ShowPanel(helpPanel);
+    }
+    
+    /// <summary>
+    /// Adds a sample task for testing
+    /// </summary>
+    public void AddSampleTask()
+    {
+        if (taskManager == null)
+            return;
+        
+        string[] sampleTasks = new string[]
+        {
+            "Complete project documentation",
+            "Review code changes",
+            "Test HUD functionality",
+            "Update README",
+            "Fix UI bugs",
+            "Implement new feature",
+            "Optimize performance",
+            "Write unit tests"
+        };
+        
+        TaskManager.TaskPriority[] priorities = new TaskManager.TaskPriority[]
+        {
+            TaskManager.TaskPriority.Low,
+            TaskManager.TaskPriority.Medium,
+            TaskManager.TaskPriority.High,
+            TaskManager.TaskPriority.Urgent
+        };
+        
+        int taskIndex = Random.Range(0, sampleTasks.Length);
+        int priorityIndex = Random.Range(0, priorities.Length);
+        
+        taskManager.CreateTask(sampleTasks[taskIndex], "Sample task description", priorities[priorityIndex]);
     }
 }
 
