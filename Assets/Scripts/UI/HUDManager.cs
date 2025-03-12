@@ -1,328 +1,216 @@
 using UnityEngine;
-using System.Collections.Generic;
-using TMPro;
-using UnityEngine.UI;
 using System.Collections;
+using TMPro;
+using Meta.XR;
 
-/// <summary>
-/// Manages the ADHD Focus Assistant HUD system
-/// Handles UI elements, layout, and feature coordination
-/// </summary>
 public class HUDManager : MonoBehaviour
 {
-    [Header("Theme Settings")]
-    [SerializeField] private List<HUDTheme> availableThemes;
-    [SerializeField] private HUDTheme defaultTheme;
-    [SerializeField] private float themeTransitionDuration = 1.0f;
+    [Header("HUD Settings")]
+    [SerializeField] private bool enableHUDOnStart = true;
+    [SerializeField] private float hudOpacity = 0.8f;
+    [SerializeField] private float hudScale = 1.0f;
+    [SerializeField] private float defaultDistance = 2.0f; // Distance from user in meters
+    [SerializeField] private bool followUserGaze = true;
     
-    [Header("Task Management")]
-    [SerializeField] private Transform taskContainer;
-    [SerializeField] private GameObject taskItemPrefab;
-    [SerializeField] private Button addTaskButton;
-    [SerializeField] private TMP_InputField taskInputField;
+    [Header("Task Display")]
+    [SerializeField] private GameObject taskListPrefab;
+    [SerializeField] private Transform taskListParent;
+    [SerializeField] private float taskUpdateInterval = 0.5f;
     
     [Header("Pomodoro Timer")]
-    [SerializeField] private GameObject pomodoroDisplay;
-    [SerializeField] private TMP_Text timerText;
-    [SerializeField] private Button startPomodoroButton;
-    [SerializeField] private Button pausePomodoroButton;
+    [SerializeField] private GameObject pomodoroTimerPrefab;
+    [SerializeField] private Transform pomodoroTimerParent;
+    [SerializeField] private float defaultWorkDuration = 25f;
+    [SerializeField] private float defaultBreakDuration = 5f;
     
     [Header("Health Tracking")]
-    [SerializeField] private GameObject healthDisplay;
-    [SerializeField] private Slider stressLevelSlider;
-    [SerializeField] private Button breathingGuideButton;
+    [SerializeField] private GameObject healthDisplayPrefab;
+    [SerializeField] private Transform healthDisplayParent;
+    [SerializeField] private float healthUpdateInterval = 1f;
     
     [Header("Gamification")]
-    [SerializeField] private GameObject achievementPanel;
-    [SerializeField] private TMP_Text xpText;
-    [SerializeField] private Slider progressBar;
+    [SerializeField] private GameObject achievementPrefab;
+    [SerializeField] private Transform achievementParent;
+    [SerializeField] private float achievementDisplayDuration = 3f;
     
     [Header("Accessibility")]
-    [SerializeField] private float defaultTextSize = 18f;
-    [SerializeField] private bool highContrastModeDefault = false;
-    [SerializeField] private bool reduceMotionDefault = false;
+    [SerializeField] private bool highContrastMode = false;
+    [SerializeField] private bool reducedMotion = false;
+    [SerializeField] private float textSize = 1f;
     
-    private TaskManager _taskManager;
-    private ThemeManager _themeManager;
-    private PomodoroManager _pomodoroManager;
-    private AchievementSystem _achievementSystem;
-    private List<Notification> _notificationQueue = new List<Notification>();
-    private bool _isInitialized = false;
-    
-    private class Notification
-    {
-        public string title;
-        public string message;
-        public NotificationPriority priority;
-        public float duration;
-    }
-    
-    private enum NotificationPriority
-    {
-        Low,
-        Medium,
-        High,
-        Urgent
-    }
-    
-    private void Awake()
-    {
-        // Find required dependencies
-        _taskManager = FindObjectOfType<TaskManager>();
-        _themeManager = FindObjectOfType<ThemeManager>();
-        _pomodoroManager = FindObjectOfType<PomodoroManager>();
-        _achievementSystem = FindObjectOfType<AchievementSystem>();
-        
-        if (_taskManager == null)
-        {
-            Debug.LogWarning("TaskManager not found. Creating one.");
-            GameObject taskManagerObj = new GameObject("TaskManager");
-            taskManagerObj.transform.SetParent(transform);
-            _taskManager = taskManagerObj.AddComponent<TaskManager>();
-        }
-    }
+    private TaskManager taskManager;
+    private bool isHUDActive = false;
+    private Vector3 targetPosition;
+    private Quaternion targetRotation;
+    private Coroutine followCoroutine;
     
     private void Start()
     {
-        InitializeHUD();
+        taskManager = FindObjectOfType<TaskManager>();
+        
+        if (enableHUDOnStart)
+        {
+            EnableHUD(true);
+        }
+        
+        if (followUserGaze)
+        {
+            StartFollowingUser();
+        }
     }
     
-    private void InitializeHUD()
+    public void EnableHUD(bool enable)
     {
-        // Load user preferences
-        LoadUserPreferences();
+        if (isHUDActive == enable)
+            return;
         
-        // Initialize theme
-        if (_themeManager != null && defaultTheme != null)
+        isHUDActive = enable;
+        SetHUDVisibility(enable);
+        
+        if (enable && followUserGaze)
         {
-            _themeManager.ChangeTheme(defaultTheme);
+            StartFollowingUser();
+        }
+        else if (!enable && followCoroutine != null)
+        {
+            StopCoroutine(followCoroutine);
+            followCoroutine = null;
+        }
+    }
+    
+    private void SetHUDVisibility(bool visible)
+    {
+        if (taskListParent != null)
+            taskListParent.gameObject.SetActive(visible);
+        
+        if (pomodoroTimerParent != null)
+            pomodoroTimerParent.gameObject.SetActive(visible);
+        
+        if (healthDisplayParent != null)
+            healthDisplayParent.gameObject.SetActive(visible);
+        
+        if (achievementParent != null)
+            achievementParent.gameObject.SetActive(visible);
+    }
+    
+    private void StartFollowingUser()
+    {
+        if (followCoroutine != null)
+        {
+            StopCoroutine(followCoroutine);
         }
         
-        // Set up task management
-        if (addTaskButton != null && taskInputField != null)
+        followCoroutine = StartCoroutine(FollowUserRoutine());
+    }
+    
+    private IEnumerator FollowUserRoutine()
+    {
+        while (isHUDActive)
         {
-            addTaskButton.onClick.AddListener(AddTask);
+            UpdateHUDPosition();
+            yield return new WaitForSeconds(0.1f); // Update every 100ms
         }
-        
-        // Set up pomodoro timer
-        if (startPomodoroButton != null && _pomodoroManager != null)
+    }
+    
+    private void UpdateHUDPosition()
+    {
+        try
         {
-            startPomodoroButton.onClick.AddListener(_pomodoroManager.StartSession);
-            
-            if (pausePomodoroButton != null)
+            #if UNITY_ANDROID && !UNITY_EDITOR
+            if (Meta.XR.EyeTracking.IsSupported && Meta.XR.EyeTracking.IsEnabled)
             {
-                pausePomodoroButton.onClick.AddListener(_pomodoroManager.PauseSession);
+                // Use eye tracking if available
+                var eyeData = Meta.XR.EyeTracking.GetEyeData();
+                if (eyeData.IsValid)
+                {
+                    targetPosition = Camera.main.transform.position + eyeData.GazeDirection * defaultDistance;
+                }
+                else
+                {
+                    // Fallback to head position
+                    targetPosition = Camera.main.transform.position + Camera.main.transform.forward * defaultDistance;
+                }
             }
+            else
+            {
+                // Use head position
+                targetPosition = Camera.main.transform.position + Camera.main.transform.forward * defaultDistance;
+            }
+            #else
+            // Editor fallback
+            targetPosition = Camera.main.transform.position + Camera.main.transform.forward * defaultDistance;
+            #endif
+            
+            // Smooth movement
+            transform.position = Vector3.Lerp(transform.position, targetPosition, Time.deltaTime * 5f);
+            
+            // Always face the user
+            targetRotation = Quaternion.LookRotation(transform.position - Camera.main.transform.position);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 5f);
         }
-        
-        // Set up breathing guide
-        if (breathingGuideButton != null)
+        catch (System.Exception e)
         {
-            breathingGuideButton.onClick.AddListener(StartBreathingExercise);
+            Debug.LogError($"[HUDManager] Error updating HUD position: {e.Message}");
         }
-        
-        // Subscribe to events
-        SubscribeToEvents();
-        
-        _isInitialized = true;
     }
     
-    private void LoadUserPreferences()
+    public void SetHUDOpacity(float opacity)
     {
-        // Text size preference
-        float textSize = PlayerPrefs.GetFloat("TextSize", defaultTextSize);
-        SetGlobalTextSize(textSize);
-        
-        // High contrast mode preference
-        bool highContrastMode = PlayerPrefs.GetInt("HighContrastMode", highContrastModeDefault ? 1 : 0) == 1;
-        SetHighContrastMode(highContrastMode);
-        
-        // Reduced motion preference
-        bool reduceMotion = PlayerPrefs.GetInt("ReduceMotion", reduceMotionDefault ? 1 : 0) == 1;
-        SetReducedMotion(reduceMotion);
+        hudOpacity = Mathf.Clamp01(opacity);
+        CanvasGroup[] canvasGroups = GetComponentsInChildren<CanvasGroup>();
+        foreach (var group in canvasGroups)
+        {
+            group.alpha = hudOpacity;
+        }
     }
     
-    private void SetGlobalTextSize(float size)
+    public void SetHUDScale(float scale)
     {
-        // Find all TextMeshPro components and set their size
-        TMP_Text[] texts = FindObjectsOfType<TMP_Text>();
+        hudScale = Mathf.Clamp(scale, 0.1f, 2f);
+        transform.localScale = Vector3.one * hudScale;
+    }
+    
+    public void UpdateAccessibilitySettings(bool highContrast, bool reduceMotion, float fontSize)
+    {
+        highContrastMode = highContrast;
+        reducedMotion = reduceMotion;
+        textSize = fontSize;
+        ApplyAccessibilitySettings();
+    }
+    
+    private void ApplyAccessibilitySettings()
+    {
+        TextMeshProUGUI[] texts = GetComponentsInChildren<TextMeshProUGUI>();
         foreach (var text in texts)
         {
-            text.fontSize = size;
-        }
-    }
-    
-    private void SetHighContrastMode(bool enabled)
-    {
-        // Apply high contrast mode if theme manager is available
-        if (_themeManager != null)
-        {
-            _themeManager.SetHighContrastMode(enabled);
-        }
-    }
-    
-    private void SetReducedMotion(bool enabled)
-    {
-        // Store the setting for other components to access
-        PlayerPrefs.SetInt("ReduceMotion", enabled ? 1 : 0);
-        PlayerPrefs.Save();
-    }
-    
-    private void SubscribeToEvents()
-    {
-        if (_taskManager != null)
-        {
-            _taskManager.OnTaskCompleted += OnTaskCompleted;
-        }
-        
-        if (_pomodoroManager != null)
-        {
-            _pomodoroManager.OnSessionCompleted += OnPomodoroSessionCompleted;
-        }
-    }
-    
-    private void AddTask()
-    {
-        if (_taskManager != null && taskInputField != null && !string.IsNullOrEmpty(taskInputField.text))
-        {
-            _taskManager.CreateTask(taskInputField.text);
-            taskInputField.text = "";
-            
-            // Give focus back to input field
-            taskInputField.ActivateInputField();
-        }
-    }
-    
-    private void OnTaskCompleted(TaskManager.Task task)
-    {
-        // Award XP for completing a task
-        if (_achievementSystem != null)
-        {
-            int xpAmount = 0;
-            
-            // XP based on priority
-            switch (task.priority)
+            text.fontSize *= textSize;
+            if (highContrastMode)
             {
-                case TaskManager.TaskPriority.Low:
-                    xpAmount = 5;
-                    break;
-                case TaskManager.TaskPriority.Medium:
-                    xpAmount = 10;
-                    break;
-                case TaskManager.TaskPriority.High:
-                    xpAmount = 15;
-                    break;
-                case TaskManager.TaskPriority.Urgent:
-                    xpAmount = 20;
-                    break;
+                text.color = Color.white;
+                text.fontStyle = FontStyles.Bold;
             }
-            
-            AddExperience(xpAmount);
         }
-    }
-    
-    private void OnPomodoroSessionCompleted()
-    {
-        // Award XP for completing a pomodoro session
-        AddExperience(15);
         
-        // Add a notification
-        AddNotification("Pomodoro completed!", "Take a short break before continuing.", NotificationPriority.Medium, 5f);
-    }
-    
-    private void StartBreathingExercise()
-    {
-        // Find and activate the breathing guide
-        BreathingGuide breathingGuide = FindObjectOfType<BreathingGuide>();
-        if (breathingGuide != null)
+        if (reducedMotion)
         {
-            breathingGuide.StartBreathingExercise();
-        }
-        else
-        {
-            Debug.LogWarning("BreathingGuide component not found");
-        }
-    }
-    
-    private void AddExperience(int amount)
-    {
-        // Update XP display
-        if (xpText != null)
-        {
-            int currentXP = PlayerPrefs.GetInt("UserXP", 0);
-            int newXP = currentXP + amount;
-            
-            PlayerPrefs.SetInt("UserXP", newXP);
-            PlayerPrefs.Save();
-            
-            xpText.text = $"XP: {newXP}";
-            
-            // Update progress bar
-            if (progressBar != null)
+            Animator[] animators = GetComponentsInChildren<Animator>();
+            foreach (var animator in animators)
             {
-                int xpForNextLevel = 100; // Simple example
-                float progress = Mathf.Clamp01((float)newXP % xpForNextLevel / xpForNextLevel);
-                StartCoroutine(AnimateProgressBar(progressBar.value, progress));
+                animator.speed = 0.5f;
             }
         }
     }
     
-    private IEnumerator AnimateProgressBar(float from, float to)
+    private void OnDestroy()
     {
-        float duration = 1.0f;
-        float elapsed = 0f;
-        
-        while (elapsed < duration)
+        if (isHUDActive)
         {
-            elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(elapsed / duration);
-            
-            if (progressBar != null)
-            {
-                progressBar.value = Mathf.Lerp(from, to, t);
-            }
-            
-            yield return null;
+            EnableHUD(false);
         }
         
-        if (progressBar != null)
+        if (followCoroutine != null)
         {
-            progressBar.value = to;
-        }
-    }
-    
-    public void AddNotification(string title, string message, NotificationPriority priority, float duration)
-    {
-        Notification notification = new Notification
-        {
-            title = title,
-            message = message,
-            priority = priority,
-            duration = duration
-        };
-        
-        _notificationQueue.Add(notification);
-        
-        if (_notificationQueue.Count == 1)
-        {
-            StartCoroutine(ProcessNotificationQueue());
-        }
-    }
-    
-    private IEnumerator ProcessNotificationQueue()
-    {
-        while (_notificationQueue.Count > 0)
-        {
-            Notification notification = _notificationQueue[0];
-            
-            // Display notification (implementation would depend on your UI)
-            Debug.Log($"[Notification] {notification.title}: {notification.message}");
-            
-            // Wait for the specified duration
-            yield return new WaitForSeconds(notification.duration);
-            
-            // Remove from queue
-            _notificationQueue.RemoveAt(0);
+            StopCoroutine(followCoroutine);
         }
     }
 }

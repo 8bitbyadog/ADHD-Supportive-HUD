@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using System.IO;
+using System.Collections.Generic;
 
 public class BuildManager : MonoBehaviour, IPreprocessBuildWithReport
 {
@@ -15,9 +16,30 @@ public class BuildManager : MonoBehaviour, IPreprocessBuildWithReport
     [Header("XR Settings")]
     [SerializeField] private bool enablePassthrough = true;
     [SerializeField] private bool enableHandTracking = true;
-    [SerializeField] private bool enableEyeTracking = false;
+    [SerializeField] private bool enableEyeTracking = true;
+
+    [Header("Performance Settings")]
+    [SerializeField] private bool optimizeForQuest3 = true;
+    [SerializeField] private bool useVulkanAPI = true;
+    [SerializeField] private int targetFrameRate = 90;
 
     public int callbackOrder => 0;
+
+    private static BuildManager instance;
+    public static BuildManager Instance => instance;
+
+    private void Awake()
+    {
+        if (instance == null)
+        {
+            instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
 
     public void OnPreprocessBuild(BuildReport report)
     {
@@ -90,54 +112,138 @@ public class BuildManager : MonoBehaviour, IPreprocessBuildWithReport
         UnityEditor.EditorUtility.SetDirty(oculusSettings);
     }
 
+    public void ConfigureForQuest3()
+    {
+        // Set Android as target platform
+        EditorUserBuildSettings.selectedBuildTargetGroup = BuildTargetGroup.Android;
+        EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+        
+        // Configure Android settings
+        PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
+        PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
+        PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
+        
+        // Set graphics API
+        if (useVulkanAPI)
+        {
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.Vulkan });
+        }
+        else
+        {
+            PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.OpenGLES3 });
+        }
+        
+        // Configure XR settings
+        PlayerSettings.stereoRenderingPath = StereoRenderingPath.SinglePass;
+        PlayerSettings.SetVirtualRealitySDKs(BuildTargetGroup.Android, new[] { "Oculus" });
+        
+        // Configure Oculus settings
+        var oculusSettings = UnityEditor.Editor.CreateInstance<OculusProjectConfig>();
+        oculusSettings.targetDeviceTypes = OculusProjectConfig.TargetDeviceType.Quest;
+        oculusSettings.targetQuest3 = true;
+        oculusSettings.targetQuestPro = false;
+        oculusSettings.targetQuest2 = false;
+        oculusSettings.targetQuest1 = false;
+        oculusSettings.targetGo = false;
+        oculusSettings.targetGearVrOrGo = false;
+        
+        // Enable features
+        if (enablePassthrough)
+        {
+            oculusSettings.enablePassthrough = true;
+        }
+        
+        if (enableHandTracking)
+        {
+            oculusSettings.enableHandTrackingSupport = true;
+        }
+        
+        if (enableEyeTracking)
+        {
+            oculusSettings.enableEyeTracking = true;
+        }
+        
+        // Configure performance settings
+        if (optimizeForQuest3)
+        {
+            OptimizeForQuest3();
+        }
+        
+        // Save Oculus settings
+        UnityEditor.EditorUtility.SetDirty(oculusSettings);
+        AssetDatabase.SaveAssets();
+    }
+    
+    private void OptimizeForQuest3()
+    {
+        // Set target frame rate
+        Application.targetFrameRate = targetFrameRate;
+        
+        // Configure quality settings
+        QualitySettings.vSyncCount = 0; // Disable VSync as Quest handles it
+        QualitySettings.maxQueuedFrames = 2; // Reduce frame latency
+        QualitySettings.anisotropicFiltering = AnisotropicFiltering.Enable; // Enable anisotropic filtering
+        
+        // Optimize rendering settings
+        QualitySettings.shadows = ShadowQuality.HardOnly;
+        QualitySettings.shadowResolution = ShadowResolution.Medium;
+        QualitySettings.shadowDistance = 20f;
+        QualitySettings.shadowCascades = 2;
+        
+        // Set texture quality
+        QualitySettings.masterTextureLimit = 0; // Full resolution
+        QualitySettings.anisotropicFiltering = AnisotropicFiltering.Enable;
+        
+        // Configure physics
+        Time.fixedDeltaTime = 1f / 90f; // Match physics to target frame rate
+        Physics.defaultSolverIterations = 8;
+        Physics.defaultSolverVelocityIterations = 2;
+    }
+
     [MenuItem("Build/Build Quest 3")]
     public static void BuildQuest3()
     {
-        var buildManager = FindObjectOfType<BuildManager>();
-        if (buildManager == null)
-        {
-            Debug.LogError("BuildManager not found in scene!");
-            return;
-        }
-
-        // Get build path
-        string fullBuildPath = Path.Combine(Application.dataPath, "..", buildManager.buildPath);
-        string apkPath = Path.Combine(fullBuildPath, "ADHDSupportiveHUD.apk");
-
-        // Configure build options
-        BuildPlayerOptions buildOptions = new BuildPlayerOptions
-        {
-            scenes = GetEnabledScenes(),
-            locationPathName = apkPath,
-            target = BuildTarget.Android,
-            options = buildManager.developmentBuild ? BuildOptions.Development : BuildOptions.None
-        };
-
-        // Build the player
-        BuildReport report = BuildPipeline.BuildPlayer(buildOptions);
-        BuildSummary summary = report.summary;
-
-        if (summary.result == BuildResult.Succeeded)
-        {
-            Debug.Log($"Build succeeded: {summary.totalSize / 1024 / 1024} MB");
-        }
-        else if (summary.result == BuildResult.Failed)
-        {
-            Debug.LogError("Build failed!");
-        }
-    }
-
-    private static string[] GetEnabledScenes()
-    {
+        // Ensure proper configuration
+        Instance.ConfigureForQuest3();
+        
+        // Define build path
+        string buildPath = EditorUtility.SaveFilePanel(
+            "Build Quest 3 APK",
+            "",
+            "ADHD_Focus_Assistant.apk",
+            "apk"
+        );
+        
+        if (string.IsNullOrEmpty(buildPath)) return;
+        
+        // Get all scenes from build settings
         var scenes = new List<string>();
-        for (int i = 0; i < EditorBuildSettings.scenes.Length; i++)
+        foreach (var scene in EditorBuildSettings.scenes)
         {
-            if (EditorBuildSettings.scenes[i].enabled)
+            if (scene.enabled)
             {
-                scenes.Add(EditorBuildSettings.scenes[i].path);
+                scenes.Add(scene.path);
             }
         }
-        return scenes.ToArray();
+        
+        // Build the APK
+        BuildPipeline.BuildPlayer(
+            scenes.ToArray(),
+            buildPath,
+            BuildTarget.Android,
+            BuildOptions.Development | BuildOptions.AutoRunPlayer
+        );
+    }
+    
+    [MenuItem("Build/Configure Quest 3 Settings")]
+    public static void ConfigureQuest3Settings()
+    {
+        Instance.ConfigureForQuest3();
+        EditorUtility.DisplayDialog(
+            "Quest 3 Configuration",
+            "Quest 3 build settings have been configured successfully.",
+            "OK"
+        );
     }
 
     // Debug methods

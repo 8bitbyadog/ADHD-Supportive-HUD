@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
 
+#if UNITY_EDITOR
 public class QuestBuildValidator : MonoBehaviour
 {
     [Header("Build Settings")]
@@ -13,6 +14,9 @@ public class QuestBuildValidator : MonoBehaviour
     public bool checkPassthrough = true;
     public bool checkHandTracking = true;
     public bool checkPerformance = true;
+    public bool checkGraphicsAPI = true;
+    public bool checkAndroidSettings = true;
+    public bool checkQualitySettings = true;
     
     private static QuestBuildValidator instance;
     public static QuestBuildValidator Instance => instance;
@@ -62,6 +66,21 @@ public class QuestBuildValidator : MonoBehaviour
             ValidatePerformance(issues);
         }
         
+        if (checkGraphicsAPI)
+        {
+            ValidateGraphicsAPI(issues);
+        }
+        
+        if (checkAndroidSettings)
+        {
+            ValidateAndroidSettings(issues);
+        }
+        
+        if (checkQualitySettings)
+        {
+            ValidateQualitySettings(issues);
+        }
+        
         if (issues.Count > 0)
         {
             Debug.LogWarning("Quest Build Validation Issues Found:");
@@ -83,7 +102,6 @@ public class QuestBuildValidator : MonoBehaviour
     
     private void ValidateXRPlugin(List<string> issues)
     {
-        #if UNITY_EDITOR
         // Check if XR Plugin Management is installed
         if (!PackageManager.PackageExists("com.unity.xr.management"))
         {
@@ -101,132 +119,126 @@ public class QuestBuildValidator : MonoBehaviour
         {
             issues.Add("Meta XR SDK is missing");
         }
-        #endif
+        
+        // Check if XR Plugin is enabled for Android
+        var generalSettings = XRGeneralSettings.Instance;
+        if (generalSettings == null || !generalSettings.Manager.isInitializationComplete)
+        {
+            issues.Add("XR Plugin is not properly initialized");
+        }
     }
     
     private void ValidatePassthrough(List<string> issues)
     {
-        #if UNITY_EDITOR
-        // Check if Passthrough is enabled in XR Plugin Management
-        var xrGeneralSettings = XRGeneralSettings.Instance;
-        if (xrGeneralSettings != null)
+        var settings = OculusProjectConfig.GetProjectConfig();
+        if (settings != null && !settings.enablePassthrough)
         {
-            var xrManager = xrGeneralSettings.Manager;
-            if (xrManager != null)
-            {
-                var oculusSettings = xrManager.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
-                if (oculusSettings != null && !oculusSettings.enablePassthrough)
-                {
-                    issues.Add("Passthrough is not enabled in Oculus XR Plugin settings");
-                }
-            }
+            issues.Add("Passthrough is not enabled in Oculus settings");
         }
-        #endif
     }
     
     private void ValidateHandTracking(List<string> issues)
     {
-        #if UNITY_EDITOR
-        // Check if Hand Tracking is enabled in Oculus settings
-        var oculusSettings = OculusProjectConfig.GetProjectConfig();
-        if (oculusSettings != null && !oculusSettings.handTrackingSupport)
+        var settings = OculusProjectConfig.GetProjectConfig();
+        if (settings != null && !settings.enableHandTrackingSupport)
         {
-            issues.Add("Hand Tracking is not enabled in Oculus Project Settings");
+            issues.Add("Hand Tracking is not enabled in Oculus settings");
         }
-        #endif
     }
     
     private void ValidatePerformance(List<string> issues)
     {
-        #if UNITY_EDITOR
-        // Check Android build settings
-        var androidSettings = PlayerSettings.GetPlatformSettings<AndroidSettings>("Android");
-        if (androidSettings != null)
+        // Check target frame rate
+        if (Application.targetFrameRate != 90)
         {
-            if (androidSettings.targetArchitectures != AndroidArchitecture.ARM64)
-            {
-                issues.Add("Target architecture should be ARM64 for Quest 3");
-            }
-            
-            if (androidSettings.minSdkVersion < AndroidSdkVersions.AndroidApiLevel24)
-            {
-                issues.Add("Minimum SDK version should be at least 24 for Quest 3");
-            }
+            issues.Add("Target frame rate should be set to 90Hz for Quest 3");
         }
         
-        // Check quality settings
-        var qualitySettings = QualitySettings.GetQualityLevel();
-        var qualityLevels = QualitySettings.names;
-        if (qualityLevels != null && qualityLevels.Length > qualitySettings)
+        // Check VSync
+        if (QualitySettings.vSyncCount != 0)
         {
-            var currentQuality = qualityLevels[qualitySettings];
-            if (currentQuality.ToLower().Contains("high") || currentQuality.ToLower().Contains("ultra"))
-            {
-                issues.Add("Quality settings might be too high for Quest 3 performance");
-            }
+            issues.Add("VSync should be disabled as Quest handles it internally");
         }
-        #endif
+        
+        // Check physics timestep
+        if (Mathf.Approximately(Time.fixedDeltaTime, 1f/90f) == false)
+        {
+            issues.Add("Physics timestep should be set to 1/90 for Quest 3");
+        }
+    }
+    
+    private void ValidateGraphicsAPI(List<string> issues)
+    {
+        var apis = PlayerSettings.GetGraphicsAPIs(BuildTarget.Android);
+        if (apis.Length == 0 || (apis[0] != GraphicsDeviceType.Vulkan && apis[0] != GraphicsDeviceType.OpenGLES3))
+        {
+            issues.Add("Graphics API should be set to Vulkan or OpenGL ES 3.1");
+        }
+    }
+    
+    private void ValidateAndroidSettings(List<string> issues)
+    {
+        // Check architecture
+        if (PlayerSettings.Android.targetArchitectures != AndroidArchitecture.ARM64)
+        {
+            issues.Add("Target architecture should be ARM64 for Quest 3");
+        }
+        
+        // Check minimum SDK version
+        if (PlayerSettings.Android.minSdkVersion < AndroidSdkVersions.AndroidApiLevel24)
+        {
+            issues.Add("Minimum SDK version should be at least 24 for Quest 3");
+        }
+        
+        // Check target SDK version
+        if (PlayerSettings.Android.targetSdkVersion != AndroidSdkVersions.AndroidApiLevelAuto)
+        {
+            issues.Add("Target SDK version should be set to 'Automatic Highest'");
+        }
+    }
+    
+    private void ValidateQualitySettings(List<string> issues)
+    {
+        // Check shadow settings
+        if (QualitySettings.shadows > ShadowQuality.HardOnly)
+        {
+            issues.Add("Shadow quality should be set to 'Hard Only' or lower for performance");
+        }
+        
+        if (QualitySettings.shadowResolution > ShadowResolution.Medium)
+        {
+            issues.Add("Shadow resolution should be set to 'Medium' or lower");
+        }
+        
+        if (QualitySettings.shadowDistance > 20f)
+        {
+            issues.Add("Shadow distance should be limited to 20 meters for performance");
+        }
+        
+        // Check texture settings
+        if (QualitySettings.masterTextureLimit > 0)
+        {
+            issues.Add("Texture quality is reduced, which may impact visual quality");
+        }
+        
+        if (QualitySettings.anisotropicFiltering != AnisotropicFiltering.Enable)
+        {
+            issues.Add("Anisotropic filtering should be enabled for better texture quality");
+        }
     }
     
     private void AutoFixIssues(List<string> issues)
     {
-        #if UNITY_EDITOR
-        foreach (var issue in issues)
+        var buildManager = FindObjectOfType<BuildManager>();
+        if (buildManager != null)
         {
-            if (issue.Contains("XR Plugin Management"))
-            {
-                PackageManager.Install("com.unity.xr.management");
-            }
-            else if (issue.Contains("Oculus XR Plugin"))
-            {
-                PackageManager.Install("com.unity.xr.oculus");
-            }
-            else if (issue.Contains("Meta XR SDK"))
-            {
-                PackageManager.Install("com.meta.xr.sdk");
-            }
-            else if (issue.Contains("Passthrough"))
-            {
-                var xrGeneralSettings = XRGeneralSettings.Instance;
-                if (xrGeneralSettings != null)
-                {
-                    var xrManager = xrGeneralSettings.Manager;
-                    if (xrManager != null)
-                    {
-                        var oculusSettings = xrManager.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
-                        if (oculusSettings != null)
-                        {
-                            oculusSettings.enablePassthrough = true;
-                        }
-                    }
-                }
-            }
-            else if (issue.Contains("Hand Tracking"))
-            {
-                var oculusSettings = OculusProjectConfig.GetProjectConfig();
-                if (oculusSettings != null)
-                {
-                    oculusSettings.handTrackingSupport = true;
-                }
-            }
-            else if (issue.Contains("Target architecture"))
-            {
-                var androidSettings = PlayerSettings.GetPlatformSettings<AndroidSettings>("Android");
-                if (androidSettings != null)
-                {
-                    androidSettings.targetArchitectures = AndroidArchitecture.ARM64;
-                }
-            }
-            else if (issue.Contains("Minimum SDK version"))
-            {
-                var androidSettings = PlayerSettings.GetPlatformSettings<AndroidSettings>("Android");
-                if (androidSettings != null)
-                {
-                    androidSettings.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
-                }
-            }
+            buildManager.ConfigureForQuest3();
+            Debug.Log("Applied Quest 3 configuration using BuildManager");
         }
-        #endif
+        else
+        {
+            Debug.LogWarning("BuildManager not found. Some issues may need to be fixed manually.");
+        }
     }
     
     public void RunPerformanceTest()
@@ -258,14 +270,36 @@ public class QuestBuildValidator : MonoBehaviour
         }
         avgFps /= fpsSamples.Count;
         
+        // Calculate frame time statistics
+        float minFrameTime = float.MaxValue;
+        float maxFrameTime = float.MinValue;
+        float totalFrameTime = 0f;
+        
+        foreach (var fps in fpsSamples)
+        {
+            float frameTime = 1000f / fps; // Convert to milliseconds
+            minFrameTime = Mathf.Min(minFrameTime, frameTime);
+            maxFrameTime = Mathf.Max(maxFrameTime, frameTime);
+            totalFrameTime += frameTime;
+        }
+        
+        float avgFrameTime = totalFrameTime / fpsSamples.Count;
+        
         Debug.Log($"Performance Test Results:");
         Debug.Log($"Average FPS: {avgFps:F1}");
         Debug.Log($"Min FPS: {Mathf.Min(fpsSamples.ToArray()):F1}");
         Debug.Log($"Max FPS: {Mathf.Max(fpsSamples.ToArray()):F1}");
+        Debug.Log($"Frame Time (ms) - Avg: {avgFrameTime:F2}, Min: {minFrameTime:F2}, Max: {maxFrameTime:F2}");
         
         if (avgFps < 70f)
         {
             Debug.LogWarning("Performance Warning: Average FPS is below 70, which may cause discomfort");
         }
+        
+        if (maxFrameTime > 16.7f) // 60 FPS threshold
+        {
+            Debug.LogWarning($"Performance Warning: Some frames took longer than 16.7ms to render (max: {maxFrameTime:F2}ms)");
+        }
     }
-} 
+}
+#endif 

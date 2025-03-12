@@ -1,10 +1,7 @@
 using System.Collections;
 using UnityEngine;
+using Meta.XR;
 
-/// <summary>
-/// Manages the passthrough AR functionality for Meta Quest devices
-/// Handles configuration and visual effects for passthrough mode
-/// </summary>
 public class PassthroughManager : MonoBehaviour
 {
     [Header("Passthrough Settings")]
@@ -37,11 +34,6 @@ public class PassthroughManager : MonoBehaviour
         EnablePassthrough(true);
     }
     
-    /// <summary>
-    /// Enables or disables the passthrough functionality
-    /// </summary>
-    /// <param name="enable">Whether to enable or disable passthrough</param>
-    /// <param name="immediate">Whether to transition immediately or use the transition duration</param>
     public void EnablePassthrough(bool enable, bool immediate = false)
     {
         if (_isPassthroughActive == enable)
@@ -88,61 +80,50 @@ public class PassthroughManager : MonoBehaviour
         _transitionCoroutine = null;
     }
     
-    /// <summary>
-    /// Sets the opacity of the passthrough
-    /// </summary>
-    /// <param name="opacity">Opacity value (0-1)</param>
     public void SetPassthroughOpacity(float opacity)
     {
         try
         {
             #if UNITY_ANDROID && !UNITY_EDITOR
-            if (OVRManager.instance != null)
+            if (Meta.XR.XRSystem.Instance != null)
             {
-                OVRManager.instance.isPassthroughEnabled = opacity > 0;
+                Meta.XR.XRSystem.Instance.PassthroughEnabled = opacity > 0;
                 
                 if (opacity > 0)
                 {
-                    // Set passthrough parameters using OculusPassthroughLayer if available
-                    var passthroughLayer = FindObjectOfType<OVRPassthroughLayer>();
+                    var passthroughLayer = FindObjectOfType<Meta.XR.PassthroughLayer>();
                     if (passthroughLayer != null)
                     {
-                        var currentStyle = passthroughLayer.colorMapEditorType;
-                        var colorAdjustment = new OVRPassthroughLayer.ColorMapEditorColorAdjustment();
-                        
+                        var colorAdjustment = new Meta.XR.PassthroughLayer.ColorAdjustment();
                         colorAdjustment.Brightness = passthroughBrightness;
                         colorAdjustment.Contrast = passthroughContrast;
-                        colorAdjustment.Posterize = 0;
                         colorAdjustment.Saturation = 0;
                         
-                        passthroughLayer.SetColorMapControls(colorAdjustment);
-                        passthroughLayer.edgeRenderingEnabled = false;
+                        passthroughLayer.SetColorAdjustment(colorAdjustment);
+                        passthroughLayer.EnableEdgeRendering = false;
                         
-                        // Use opacity value
-                        var currentColor = passthroughLayer.edgeColor;
+                        var currentColor = passthroughLayer.EdgeColor;
                         currentColor.a = opacity;
-                        passthroughLayer.edgeColor = currentColor;
+                        passthroughLayer.EdgeColor = currentColor;
                     }
                     else
                     {
-                        LogMessage("No OVRPassthroughLayer found. Creating one.");
+                        LogMessage("No PassthroughLayer found. Creating one.");
                         
-                        // Create a new GameObject with OVRPassthroughLayer if it doesn't exist
                         var passthroughObject = new GameObject("PassthroughLayer");
-                        passthroughLayer = passthroughObject.AddComponent<OVRPassthroughLayer>();
+                        passthroughLayer = passthroughObject.AddComponent<Meta.XR.PassthroughLayer>();
                         
-                        // Configure the layer
-                        var colorAdjustment = new OVRPassthroughLayer.ColorMapEditorColorAdjustment();
+                        var colorAdjustment = new Meta.XR.PassthroughLayer.ColorAdjustment();
                         colorAdjustment.Brightness = passthroughBrightness;
                         colorAdjustment.Contrast = passthroughContrast;
                         
-                        passthroughLayer.SetColorMapControls(colorAdjustment);
+                        passthroughLayer.SetColorAdjustment(colorAdjustment);
                     }
                 }
             }
             else
             {
-                LogError("OVRManager instance not found. Cannot set passthrough opacity.");
+                LogError("XRSystem instance not found. Cannot set passthrough opacity.");
             }
             #else
             LogMessage($"Setting passthrough opacity to {opacity} (Editor mode)");
@@ -154,11 +135,6 @@ public class PassthroughManager : MonoBehaviour
         }
     }
     
-    /// <summary>
-    /// Updates the passthrough visual settings
-    /// </summary>
-    /// <param name="brightness">Brightness adjustment (-1 to 1)</param>
-    /// <param name="contrast">Contrast adjustment (-1 to 1)</param>
     public void UpdatePassthroughSettings(float brightness, float contrast)
     {
         passthroughBrightness = brightness;
@@ -169,14 +145,14 @@ public class PassthroughManager : MonoBehaviour
             try
             {
                 #if UNITY_ANDROID && !UNITY_EDITOR
-                var passthroughLayer = FindObjectOfType<OVRPassthroughLayer>();
+                var passthroughLayer = FindObjectOfType<Meta.XR.PassthroughLayer>();
                 if (passthroughLayer != null)
                 {
-                    var colorAdjustment = new OVRPassthroughLayer.ColorMapEditorColorAdjustment();
+                    var colorAdjustment = new Meta.XR.PassthroughLayer.ColorAdjustment();
                     colorAdjustment.Brightness = brightness;
                     colorAdjustment.Contrast = contrast;
                     
-                    passthroughLayer.SetColorMapControls(colorAdjustment);
+                    passthroughLayer.SetColorAdjustment(colorAdjustment);
                 }
                 #endif
             }
@@ -191,14 +167,12 @@ public class PassthroughManager : MonoBehaviour
     {
         if (!pauseStatus && _isPassthroughActive)
         {
-            // Re-enable passthrough when app resumes
             EnablePassthrough(true, true);
         }
     }
     
     private void OnDestroy()
     {
-        // Ensure passthrough is disabled when the component is destroyed
         if (_isPassthroughActive)
         {
             EnablePassthrough(false, true);
